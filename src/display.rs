@@ -1,100 +1,39 @@
 use crate::keyboard_capture::Keymap;
-use gtk::prelude::*;
-use gtk::{Application, ApplicationWindow, Frame};
+use glium::{Surface, glutin};
 
-pub fn start_ui(app: &Application) {
-    let window = ApplicationWindow::builder()
-        .application(app)
-        .default_width(320)
-        .default_height(180)
-        .title("Input Display")
-        .build();
+pub fn start_display() {
+    // Set up X server connection and keymap
+    let (conn, _) = x11rb::connect(None).unwrap();
+    let mut km = Keymap::new(conn);
 
-    let fixed = gtk::Fixed::new();
+    let event_loop = glutin::event_loop::EventLoop::new();
+    let wb = glutin::window::WindowBuilder::new();
+    let cb = glutin::ContextBuilder::new();
+    let display = glium::Display::new(wb, cb, &event_loop).unwrap();
 
-    window.set_child(Some(&fixed));
-    window.set_resizable(false);
-    window.present();
-}
+    event_loop.run(move |ev, _, control_flow| {
+        let next_frame_time = std::time::Instant::now() + std::time::Duration::from_nanos(16_666_667);
 
-pub struct BoundingBox(i32, i32, i32, i32);
-pub struct Color(u8, u8, u8, u8);
+        km.update_keymap().unwrap();
 
-pub struct KeyDisplay {
-    pub keys: Vec<KeyDisplayElement>,
-
-    pub background: Color,
-    pub unpressed: Color,
-    pub unpressed_text: Color,
-    pub pressed: Color,
-    pub pressed_text: Color
-}
-
-pub struct KeyDisplayElement {
-    pub keys: Vec<u8>,
-    pub display: String,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-
-    pressed: bool,
-    frame: Frame
-}
-
-// TODO: Serde [de]serialization
-
-impl KeyDisplay {
-    pub fn new() -> Self {
-        KeyDisplay {
-            keys: Vec::new(),
-            background: Color(0, 0, 0, 255),
-            unpressed: Color(255, 255, 255, 255),
-            unpressed_text: Color(0, 0, 0, 255),
-            pressed: Color(255, 0, 0, 255),
-            pressed_text: Color(0, 0, 0, 255)
+        *control_flow = glutin::event_loop::ControlFlow::WaitUntil(next_frame_time);
+        match ev {
+            glutin::event::Event::WindowEvent { event, .. } => match event {
+                glutin::event::WindowEvent::CloseRequested => {
+                    *control_flow = glutin::event_loop::ControlFlow::Exit;
+                    return;
+                },
+                _ => return,
+            },
+            glutin::event::Event::NewEvents(cause) => match cause {
+                glutin::event::StartCause::ResumeTimeReached { .. } => (),
+                glutin::event::StartCause::Init => (),
+                _ => return,
+            },
+            _ => (),
         }
-    }
-}
-
-impl KeyDisplayElement {
-    pub fn new(x: i32, y: i32, w: i32, h: i32, keys: Vec<u8>, display: String) -> Self {
-        let frame = Frame::new(Some(&display));
-
-        KeyDisplayElement {
-            keys: keys,
-            display: display,
-            x: x,
-            y: y,
-            w: w,
-            h: h,
-            pressed: false,
-            frame: frame
-        }
-    }
-
-    pub fn get_position(self: &Self) -> BoundingBox {
-        BoundingBox(self.x, self.y, self.w, self.h)
-    }
-
-    pub fn get_pressed(self: &Self) -> bool {
-        self.pressed
-    }
-
-    pub fn update_position(self: &mut Self, rect: &BoundingBox) {
-        self.x = rect.0;
-        self.y = rect.1;
-        self.w = rect.2;
-        self.h = rect.3;
-    }
-
-    pub fn update_pressed(self: &mut Self, keymap: &Keymap) {
-        self.pressed = false;
-
-        for (_, key) in self.keys.iter().enumerate() {
-            if keymap.get_key(*key) {
-                self.pressed = true;
-            }
-        }
-    }
+        let mut target = display.draw();
+        target.clear_color(0.0, 0.0, 1.0, 1.0);
+        target.finish().unwrap();
+    });
 }
