@@ -8,11 +8,11 @@ impl Keymap {
         Keymap { connection: connection, keypresses: [false; 256] }
     }
     
-    pub fn get_key(self: &Self, keycode: u8) -> bool {
+    pub fn get_key(&self, keycode: u8) -> bool {
         self.keypresses[keycode as usize + 8]
     }
 
-    pub fn update_keymap(self: &mut Self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn update_keymap(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let keymap = x11rb::protocol::xproto::query_keymap(&self.connection);
         let keymap = match keymap {
             Ok(kbdmap) => kbdmap.reply(),
