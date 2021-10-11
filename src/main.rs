@@ -20,7 +20,7 @@ fn main() {
         }
 
         // Read from specified file
-        let filename = args.first().unwrap();
+        let filename = args.get(1).expect("Failed to get filename argument");
         let file_contents = fs::read_to_string(&filename).expect("Failed to read configuration file");
         let file_contents = file_contents.lines();
 
