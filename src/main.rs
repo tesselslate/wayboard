@@ -32,16 +32,16 @@ fn main() {
             if line.starts_with("pressed:") {
                 let (r, g, b, a) = scan_fmt!(&line, "pressed:r={},g={},b={},a={}", i32, i32, i32, i32).expect("Failed to read pressed key color");
                 
-                if background.is_none() {
-                    background = Some(Color(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0));
+                if pressed.is_none() {
+                    pressed = Some(Color(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0));
                 } else {
                     println!("Warning: Your configuration file contains multiple pressed key colors");
                 }
             } else if line.starts_with("background:") {
                 let (r, g, b, a) = scan_fmt!(&line, "background:r={},g={},b={},a={}", i32, i32, i32, i32).expect("Failed to read background key color");
             
-                if pressed.is_none() {
-                    pressed = Some(Color(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0));
+                if background.is_none() {
+                    background = Some(Color(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0));
                 } else {
                     println!("Warning: Your configuration file contains multiple background colors");
                 }
