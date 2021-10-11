@@ -13,7 +13,7 @@ pub struct Keyboard {
 pub struct KeyboardElement {
     pub pressed: bool,
     pub area: Rectangle,
-    pub keys: Vec<u8>,
+    pub keycode: u8,
 
     pub vertices: Option<glium::vertex::VertexBuffer<Vertex>>
 }
@@ -35,22 +35,16 @@ impl Keyboard {
 }
 
 impl KeyboardElement {
-    pub fn new(area: Rectangle, keys: Vec<u8>) -> Self {
+    pub fn new(area: Rectangle, key: u8) -> Self {
         KeyboardElement {
             pressed: false,
             area: area, 
-            keys: keys,
+            keycode: key,
             vertices: None
         }
     }
 
     pub fn update(&mut self, keymap: &Keymap) {
-        self.pressed = false;
-
-        for key in self.keys.iter() {
-            if keymap.get_key(*key) {
-                self.pressed = true;
-            }
-        }
+        self.pressed = keymap.get_key(self.keycode);
     }
 }
