@@ -111,7 +111,7 @@ fn show_keycodes() -> ! {
     let mut keymap = Keymap::new(conn);
 
     loop {
-        keymap.update_keymap().unwrap();
+        keymap.update_keymap().expect("Failed to update keymap");
 
         for n in 0..247_u8 {
             if keymap.get_key(n) {

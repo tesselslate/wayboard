@@ -60,5 +60,5 @@ pub fn get_program(display: &Display) -> glium::Program {
         }
     "#;
 
-    glium::Program::from_source(display, vertex_shader, fragment_shader, None).unwrap()
+    glium::Program::from_source(display, vertex_shader, fragment_shader, None).expect("Failed to create shader")
 }

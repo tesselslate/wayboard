@@ -5,7 +5,7 @@ use glium::{Surface, glutin, uniform, vertex::VertexBuffer};
 
 pub fn start_display(mut keyboard: Keyboard) {
     // Set up X server connection and keymap
-    let (conn, _) = x11rb::connect(None).unwrap();
+    let (conn, _) = x11rb::connect(None).expect("Failed to connect to X server");
     let mut km = Keymap::new(conn);
 
     // Glium setup
@@ -18,14 +18,14 @@ pub fn start_display(mut keyboard: Keyboard) {
     let cb = glutin::ContextBuilder::new()
         .with_vsync(true);
 
-    let display = glium::Display::new(wb, cb, &event_loop).unwrap();
+    let display = glium::Display::new(wb, cb, &event_loop).expect("Failed to create window");
     let index_buffer = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
     let program = get_program(&display);
     let pressed_color: [f32; 4] = [keyboard.pressed.0, keyboard.pressed.1, keyboard.pressed.2, keyboard.pressed.3];
 
     // Set up vertex buffers for each key
     for key in keyboard.keys.iter_mut() {
-        let vtx = VertexBuffer::new(&display, &key.area.vertices()).unwrap();
+        let vtx = VertexBuffer::new(&display, &key.area.vertices()).expect("Failed to create vertex buffer");
         key.vertices = Some(vtx);
     }
 
@@ -42,7 +42,7 @@ pub fn start_display(mut keyboard: Keyboard) {
             },
             glutin::event::Event::MainEventsCleared => {
                 // Update keyboard state
-                km.update_keymap().unwrap();
+                km.update_keymap().expect("Failed to update keymap");
                 keyboard.update(&mut km);
 
                 let mut target = display.draw();
@@ -53,18 +53,18 @@ pub fn start_display(mut keyboard: Keyboard) {
                 for key in keyboard.keys.iter() {
                     if key.pressed {
                         target.draw(
-                            key.vertices.as_ref().unwrap(), 
+                            key.vertices.as_ref().expect("Failed to draw vertices"), 
                             &index_buffer, 
                             &program, 
                             &uniform! { 
                                 in_color: pressed_color
                             }, 
                             &Default::default()
-                        ).unwrap();
+                        ).expect("Failed to draw key display");
                     }
                 }
 
-                target.finish().unwrap();
+                target.finish().expect("Failed to finalize frame");
             },
             _ => (),
         }
