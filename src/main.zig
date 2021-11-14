@@ -1,4 +1,4 @@
-const std = @import("std");
+const std       = @import("std");
 const display   = @import("display.zig");
 const keyboard  = @import("keyboard.zig");
 const xcb       = @import("lib/xcb.zig");

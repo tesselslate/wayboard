@@ -50,23 +50,26 @@ pub const EventType = enum(u32) {
 };
 
 // SDL_hints.h
-pub const HintBypassCompositor          = c.SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR;
-pub const HintRenderVsync               = c.SDL_HINT_RENDER_VSYNC;
-pub const SetHint                       = c.SDL_SetHint;
+pub const HintBypassCompositor  = c.SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR;
+pub const HintRenderVsync       = c.SDL_HINT_RENDER_VSYNC;
+pub const SetHint               = c.SDL_SetHint;
 
 // SDL_rect.h
-
+pub const Rect                  = c.SDL_Rect;
 
 // SDL_render.h
-pub const CreateRenderer    = c.SDL_CreateRenderer;
-pub const DestroyRenderer   = c.SDL_DestroyRenderer;
-pub const Renderer          = c.SDL_Renderer;
-pub const RenderClear       = c.SDL_RenderClear;
-pub const RenderPresent     = c.SDL_RenderPresent;
+pub const CreateRenderer        = c.SDL_CreateRenderer;
+pub const DestroyRenderer       = c.SDL_DestroyRenderer;
+pub const Renderer              = c.SDL_Renderer;
+pub const RenderClear           = c.SDL_RenderClear;
+pub const RenderPresent         = c.SDL_RenderPresent;
+
+pub const RenderFillRects       = c.SDL_RenderFillRects;
+pub const SetRenderDrawColor    = c.SDL_SetRenderDrawColor;
 
 // SDL_video.h
-pub const CreateWindow      = c.SDL_CreateWindow;
-pub const DestroyWindow     = c.SDL_DestroyWindow;
-pub const Window            = c.SDL_Window;
-pub const WindowResizable   = c.SDL_WINDOW_RESIZABLE;
-pub const WindowPosCentered = c.SDL_WINDOWPOS_CENTERED;
+pub const CreateWindow          = c.SDL_CreateWindow;
+pub const DestroyWindow         = c.SDL_DestroyWindow;
+pub const Window                = c.SDL_Window;
+pub const WindowResizable       = c.SDL_WINDOW_RESIZABLE;
+pub const WindowPosCentered     = c.SDL_WINDOWPOS_CENTERED;
