@@ -7,10 +7,11 @@ pub const KeyboardError = error {
 };
 
 pub const Keyboard = struct {
+    connection: ?*xcb.Connection,
     keys: [256]bool,
 
-    pub fn captureKeyboard(self: *Keyboard, conn: ?*xcb.Connection) !void {
-        if (conn) |xcb_conn| {
+    pub fn captureKeyboard(self: *Keyboard) !void {
+        if (self.connection) |xcb_conn| {
             var result: ?xcb.QueryKeymapCookie = xcb.QueryKeymap(xcb_conn);
             if (result) |res| {
                 // this error should probably be handled but i don't know how to
