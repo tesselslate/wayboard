@@ -1,6 +1,0 @@
-pressed:r=255,g=255,b=255,a=255
-background:r=255,g=0,b=255,a=255
-key:x=10,y=10,w=40,h=40,keycode=30
-key:x=10,y=50,w=40,h=40,keycode=31
-key:x=50,y=50,w=40,h=40,keycode=32
-key:x=50,y=10,w=40,h=40,keycode=33
