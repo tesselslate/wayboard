@@ -22,9 +22,7 @@ pub const Element = struct {
     h: u16
 };
 
-pub fn readFromFile(filename: []const u8) !Config {
-    var alloc = std.heap.c_allocator;
-
+pub fn readFromFile(filename: []const u8, alloc: *std.mem.Allocator) !Config {
     var file = try std.fs.openFileAbsolute(filename, .{ .read = true });
     const file_content = try file.reader().readAllAlloc(alloc, 1048576);
     defer alloc.free(file_content);
@@ -37,7 +35,6 @@ pub fn readFromFile(filename: []const u8) !Config {
 
     var stream = std.json.TokenStream.init(file_content);
     var result = try std.json.parse(Config, &stream, .{ .allocator = alloc });
-    std.json.parseFree(Config, result, .{ .allocator = alloc });
 
     return result;
 }

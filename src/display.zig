@@ -1,4 +1,5 @@
 const std = @import("std");
+const config = @import("config.zig");
 const keyboard = @import("keyboard.zig");
 const sdl = @import("lib/sdl.zig");
 
@@ -9,6 +10,7 @@ pub const DisplayError = error {
 };
 
 pub const Display = struct {
+    config: config.Config,
     keyboard: keyboard.Keyboard,
     renderer: ?*sdl.Renderer,
     running: bool,
@@ -32,7 +34,38 @@ pub const Display = struct {
             try self.keyboard.captureKeyboard();
 
             // render input display
+            _ = sdl.SetRenderDrawColor(
+                self.renderer, 
+                self.config.background.r, 
+                self.config.background.g, 
+                self.config.background.b, 
+                self.config.background.a
+            );
             _ = sdl.RenderClear(self.renderer);
+
+            for (self.config.keys) |key, _| {
+                var color: config.Color = undefined;
+                if (self.keyboard.keys[key.keycode]) {
+                    color = key.pressed;
+                } else {
+                    color = key.unpressed;
+                }
+                
+                _ = sdl.SetRenderDrawColor(
+                    self.renderer,
+                    color.r, color.g, color.b, color.a
+                );
+
+                var rect = sdl.Rect {
+                    .x = key.x,
+                    .y = key.y,
+                    .w = key.w,
+                    .h = key.h
+                };
+
+                _ = sdl.RenderFillRect(self.renderer, &rect);
+            }
+
             sdl.RenderPresent(self.renderer);
         }
     }
@@ -72,6 +105,6 @@ pub const Display = struct {
         defer sdl.DestroyRenderer(self.renderer);
 
         // main loop
-        try loop(self);
+        try self.loop();
     }
 };

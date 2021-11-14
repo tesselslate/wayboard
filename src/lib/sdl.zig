@@ -64,7 +64,7 @@ pub const Renderer              = c.SDL_Renderer;
 pub const RenderClear           = c.SDL_RenderClear;
 pub const RenderPresent         = c.SDL_RenderPresent;
 
-pub const RenderFillRects       = c.SDL_RenderFillRects;
+pub const RenderFillRect        = c.SDL_RenderFillRect;
 pub const SetRenderDrawColor    = c.SDL_SetRenderDrawColor;
 
 // SDL_video.h
