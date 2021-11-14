@@ -22,5 +22,11 @@ For running `input-display`, you will need:
 Additionally, for building `input-display`, you will need to make sure that you have:
 - The `sdl2` development headers
   - These come with `sdl2` on certain distributions, such as Arch.
-  - On others (such as Debian), you will need a `libsdl2-dev` (or your distribution's equivalent).
+  - On others (such as Debian), you will need `libsdl2-dev` (or your distribution's equivalent).
 - The [Zig](https://github.com/ziglang/zig) compiler
+
+# Planned Features
+- A configuration GUI
+- Fix crash on relative path
+- Improve error messages and handling
+- Add support for text/image rendering
