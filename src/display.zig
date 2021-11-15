@@ -26,7 +26,7 @@ pub const Display = struct {
 
             // update pressed keys
             self.keyboard.captureKeyboard() catch |err| {
-                std.log.warn("Keyboard capture was not successful: {any}", err);
+                std.log.warn("Keyboard capture was not successful: {any}", .{ err });
             };
 
             // render input display
@@ -39,7 +39,7 @@ pub const Display = struct {
             );
             _ = sdl.RenderClear(self.renderer);
 
-            for (self.config.keys) |key, _| {
+            for (self.config.keys) |key| {
                 var color: config.Color = undefined;
                 if (self.keyboard.keys[key.keycode]) {
                     color = key.pressed;

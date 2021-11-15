@@ -30,15 +30,15 @@ pub const Keyboard = struct {
                         }
                     }
                 } else {
-                    std.log.crit("xcb_query_keymap_reply returned a null response");
+                    std.log.crit("xcb_query_keymap_reply returned a null response", .{});
                     return error.XCB_ResponseNull;
                 }
             } else {
-                std.log.crit("xcb_query_keymap returned a null response");
+                std.log.crit("xcb_query_keymap returned a null response", .{});
                 return error.XCB_CookieNull;
             }
         } else {
-            std.log.crit("xcb_connection was null");
+            std.log.crit("xcb_connection was null", .{});
             return error.XCB_ConnectionNull;
         }
 
