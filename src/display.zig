@@ -3,12 +3,6 @@ const config = @import("config.zig");
 const keyboard = @import("keyboard.zig");
 const sdl = @import("lib/sdl.zig");
 
-pub const DisplayError = error {
-    SDL_Init,
-    SDL_Renderer,
-    SDL_Window
-};
-
 pub const Display = struct {
     config: config.Config,
     keyboard: keyboard.Keyboard,
@@ -31,7 +25,9 @@ pub const Display = struct {
             }
 
             // update pressed keys
-            try self.keyboard.captureKeyboard();
+            self.keyboard.captureKeyboard() catch |err| {
+                std.log.warn("Keyboard capture was not successful: {any}", err);
+            };
 
             // render input display
             _ = sdl.SetRenderDrawColor(
@@ -76,8 +72,8 @@ pub const Display = struct {
         defer sdl.Quit();
 
         if (init_result != 0) {
-            std.debug.print("SDL_Init error: {s}", .{sdl.GetError()});
-            return DisplayError.SDL_Init;
+            std.log.crit("SDL_Init error: {s}", .{ sdl.GetError() });
+            return error.SDL_Init;
         }
 
         // set hints
@@ -92,15 +88,15 @@ pub const Display = struct {
             160, 160, 
             sdl.WindowResizable
         ) orelse {
-            std.debug.print("SDL_CreateWindow error: {s}", .{sdl.GetError()});
-            return DisplayError.SDL_Window;
+            std.log.crit("SDL_CreateWindow error: {s}", .{ sdl.GetError() });
+            return error.SDL_CreateWindow;
         };
         defer sdl.DestroyWindow(self.window);
 
         // renderer initialization
         self.renderer = sdl.CreateRenderer(self.window, -1, 0) orelse {
-            std.debug.print("SDL_CreateRenderer error: {s}", .{sdl.GetError()});
-            return DisplayError.SDL_Renderer;
+            std.log.crit("SDL_CreateRenderer error: {s}", .{ sdl.GetError() });
+            return error.SDL_CreateRenderer;
         };
         defer sdl.DestroyRenderer(self.renderer);
 

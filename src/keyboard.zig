@@ -1,10 +1,5 @@
+const std = @import("std");
 const xcb = @import("lib/xcb.zig");
-
-pub const KeyboardError = error {
-    ConnectionNull,
-    QueryCookieNull,
-    QueryResultNull
-};
 
 pub const Keyboard = struct {
     connection: ?*xcb.Connection,
@@ -35,13 +30,16 @@ pub const Keyboard = struct {
                         }
                     }
                 } else {
-                    return KeyboardError.QueryResultNull;
+                    std.log.crit("xcb_query_keymap_reply returned a null response");
+                    return error.XCB_ResponseNull;
                 }
             } else {
-                return KeyboardError.QueryCookieNull;
+                std.log.crit("xcb_query_keymap returned a null response");
+                return error.XCB_CookieNull;
             }
         } else {
-            return KeyboardError.ConnectionNull;
+            std.log.crit("xcb_connection was null");
+            return error.XCB_ConnectionNull;
         }
 
         return;

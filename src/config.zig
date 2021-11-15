@@ -29,7 +29,7 @@ pub fn readFromFile(filename: []const u8, alloc: *std.mem.Allocator) !Config {
 
     var valid = std.json.validate(file_content);
     if (!valid) {
-        std.debug.print("Invalid configuration file!", .{});
+        std.log.crit("Configuration file contains invalid JSON", .{});
         return error.InvalidJson;
     }
 

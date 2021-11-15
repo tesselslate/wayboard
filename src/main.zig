@@ -14,7 +14,7 @@ pub fn main() !void {
     _ = args.skip(); // skip executable name
     const config_path = try args.next(a) orelse {
         std.log.crit("No configuration file specified.", .{});
-        return;
+        return error.NoConfig;
     };
     
     const cfg = try config.readFromFile(config_path, a);
