@@ -23,7 +23,20 @@ pub const Element = struct {
 };
 
 pub fn readFromFile(filename: []const u8, alloc: *std.mem.Allocator) !Config {
-    var file = try std.fs.openFileAbsolute(filename, .{ .read = true });
+    // convert path to absolute path, if necessary
+    var filepath: []const u8 = undefined;
+
+    if (std.fs.path.isAbsolute(filename)) {
+        filepath = filename;
+    } else {
+        const cwd = try std.process.getCwdAlloc(alloc);
+
+        filepath = try std.fs.path.join(alloc, &[_][]const u8 {
+            cwd, filename
+        });
+    }
+
+    const file = try std.fs.openFileAbsolute(filepath, .{ .read = true });
     const file_content = try file.reader().readAllAlloc(alloc, 1048576);
     defer alloc.free(file_content);
 
