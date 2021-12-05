@@ -104,16 +104,14 @@ int sdl_setup() {
     return 0;
 }
 
-int sdl_loop() {
+void sdl_loop() {
     SDL_Event evt;
 
     while (1) {
         while (SDL_PollEvent(&evt) != 0) {
             if (evt.type == SDL_QUIT) {
-                SDL_Quit();
-                exit(0);
+                return;
             }
-
         }
 
         // update keymap
@@ -140,8 +138,6 @@ int sdl_loop() {
         
         SDL_RenderPresent(renderer);
     }
-
-    return 0;
 }
 
 void parse_hex(unsigned int color, uint8_t* r, uint8_t* g, uint8_t* b) {
