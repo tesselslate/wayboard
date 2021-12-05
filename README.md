@@ -27,7 +27,9 @@ key=40,x=10,y=25,w=50,h=50
 
 The size of the display is currently hardcoded at 160x160. Keep this in mind when writing your configuration.
 
-> You should probably run `input-display` with a shell script of some sort so you don't have to retype your configuration.
+### Tips
+- You should probably run `input-display` with a shell script of some sort so you don't have to retype your configuration each time you launch it.
+- You can get keycodes using `xmodmap -pke`. If you want to find a specific letter or number, then try `xmodmap -pke | grep '= <letter/num>'`.
 
 # Dependencies
 For running `input-display`, you will need:
