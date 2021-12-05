@@ -52,8 +52,11 @@ int get_keymap(xcb_connection_t* conn) {
     if (reply != NULL) {
         for (int i = 0; i < 32; i++) {
             uint8_t keybyte = reply->keys[i];
-            for (int b = 1; b < 8; b++) {
-                keymap[i * 8 + b] = keybyte & (1 << i);
+            for (int b = 0; b < 8; b++) {
+                keymap[i * 8 + b] = keybyte & (1 << b);
+                if (keymap[i * 8 + b] != 0) {
+                    printf("woo! %u\n", i * 8 + b);
+                }
             }
         }
 
