@@ -114,30 +114,31 @@ int sdl_loop() {
                 exit(0);
             }
 
-            // update keymap
-            get_keymap(connection);
-
-            // render display
-            SDL_SetRenderDrawColor(renderer, config.ir, config.ig, config.ib, 255);
-            SDL_RenderClear(renderer);
-
-            for (int i = 0; i < config.element_count; i++) {
-                kbd_element element = config.elements[i];
-
-                if (keymap[element.keycode] != 0) {
-                    SDL_Rect rect;
-                    rect.x = element.x;
-                    rect.y = element.y;
-                    rect.w = element.w;
-                    rect.h = element.h;
-
-                    SDL_SetRenderDrawColor(renderer, config.ar, config.ag, config.ab, 255);
-                    SDL_RenderFillRect(renderer, &rect);
-                }
-            }
-            
-            SDL_RenderPresent(renderer);
         }
+
+        // update keymap
+        get_keymap(connection);
+
+        // render display
+        SDL_SetRenderDrawColor(renderer, config.ir, config.ig, config.ib, 255);
+        SDL_RenderClear(renderer);
+
+        for (int i = 0; i < config.element_count; i++) {
+            kbd_element element = config.elements[i];
+
+            if (keymap[element.keycode] != 0) {
+                SDL_Rect rect;
+                rect.x = element.x;
+                rect.y = element.y;
+                rect.w = element.w;
+                rect.h = element.h;
+
+                SDL_SetRenderDrawColor(renderer, config.ar, config.ag, config.ab, 255);
+                SDL_RenderFillRect(renderer, &rect);
+            }
+        }
+        
+        SDL_RenderPresent(renderer);
     }
 
     return 0;
