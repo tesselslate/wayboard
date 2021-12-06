@@ -30,13 +30,13 @@ typedef struct {
     uint8_t ib;
 
     uint8_t element_count;
-    kbd_element elements[255];
+    kbd_element elements[256];
 } kbd_config;
 
 // global state
 kbd_config config;
 xcb_connection_t* connection;
-uint8_t keymap[255];
+uint8_t keymap[256];
 
 SDL_Renderer* renderer;
 SDL_Window* window;
