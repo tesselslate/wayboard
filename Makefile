@@ -1,14 +1,24 @@
-# debug build
+# configuration
+DESTINATION	= /usr/local
+CC 			= cc
+LD_FLAGS	= -lSDL2 -lX11 -lxcb
+
+# configuration (cflags)
+#CFLAGS		= -fanalyzer -fsanitize=undefined -g -O0 -Wall -Wextra -Werror -pedantic
+CFLAGS		= -Os -Wall -Wextra -Werror -pedantic
+
+# tasks
 input-display:
 	mkdir -p out
-	gcc -fanalyzer -fsanitize=undefined -Wall -Wextra -pedantic -o out/input-display input-display.c -lSDL2 -lX11 -lxcb
+	${CC} ${CFLAGS} -o out/input-display input-display.c ${LD_FLAGS}
 
-# optimized build
-build-optimized:
-	mkdir -p out
-	gcc -Os -Wall -Wextra -pedantic -o out/input-display input-display.c -lSDL2 -lX11 -lxcb
+clean:
+	rm -f out/input-display
 
-install: build-optimized
-	mkdir -p ${DESTDIR}/bin
-	cp out/input-display ${DESTDIR}/bin
-	chmod 755 ${DESTDIR}/bin/input-display
+install: input-display
+	mkdir -p ${DESTINATION}/bin
+	cp out/input-display ${DESTINATION}/bin
+	chmod 755 ${DESTINATION}/bin/input-display
+
+uninstall:
+	rm -f ${DESTINATION}/bin/input-display
