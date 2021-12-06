@@ -2,11 +2,17 @@
 `input-display` is a small, simple application for displaying keyboard inputs 
 on Linux. At the moment, it requires that you are using X11.
 
+# Installation
+`input-display` is not currently available on any package repositories. You will have to build and install it from source. It's not too difficult; make sure you have all of the [dependencies](#dependencies) first.
+
+Then, do the following
+- Clone the repository to a directory of your choosing
+- Change any configuration values in the `Makefile` as needed
+- Run `make install` as root
+
 # Usage
 `input-display {COLORS} ...`
 - Start `input-display` with the specified configuration.
-
-You will also need to make sure that you have all of the necessary [dependencies.](#dependencies)
 
 # Configuration
 `input-display` accepts configuration in the form of command line arguments.
@@ -36,10 +42,12 @@ For running `input-display`, you will need:
 - `libxcb`
 - `sdl2`
 
-Additionally, for building `input-display`, you will need to make sure that 
-you have the development headers for both `libxcb` and `sdl2`.
-  - These come with the normal packages on certain distributions, such as Arch.
-  - On others (such as Debian), you will need to get them manually.
+Additionally, for building `input-display`, you will need:
+- A C compiler toolchain (currently only tested with `gcc`)
+- GNU `make`
+- The development headers for both `libxcb` and `sdl2`
+  - These come with the normal packages on some distributions (e.g. Arch)
+  - On others (such as Debian), you'll have to get them manually
 
 # Planned Features
 - A configuration GUI
