@@ -45,8 +45,8 @@ SDL_Window* window;
 int get_keymap(xcb_connection_t* conn) {
     // query keymap state
     xcb_query_keymap_cookie_t cookie = xcb_query_keymap(conn);
-    xcb_generic_error_t** error = NULL;
-    xcb_query_keymap_reply_t* reply = xcb_query_keymap_reply(conn, cookie, error);
+    xcb_generic_error_t* error = NULL;
+    xcb_query_keymap_reply_t* reply = xcb_query_keymap_reply(conn, cookie, &error);
 
     // update keymap array
     if (reply != NULL) {
@@ -57,6 +57,7 @@ int get_keymap(xcb_connection_t* conn) {
             }
         }
 
+        free(reply);
         return 0;
     } else {
         fprintf(stderr, "xcb_query_keymap_reply returned a null response.");
