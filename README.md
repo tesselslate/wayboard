@@ -5,7 +5,7 @@ on Linux. At the moment, it requires that you are using X11.
 # Installation
 `input-display` is not currently available on any package repositories. You will have to build and install it from source. It's not too difficult; make sure you have all of the [dependencies](#dependencies) first.
 
-Then, do the following
+Then, do the following:
 - Clone the repository to a directory of your choosing
 - Change any configuration values in the `Makefile` as needed
 - Run `make install` as root
@@ -39,13 +39,13 @@ The size of the display is currently hardcoded at 160x160. Keep this in mind whe
 
 # Dependencies
 For running `input-display`, you will need:
-- `libxcb`
+- `libx11` and `libxcb`
 - `sdl2`
 
 Additionally, for building `input-display`, you will need:
 - A C compiler toolchain (currently only tested with `gcc`)
 - GNU `make`
-- The development headers for both `libxcb` and `sdl2`
+- The development headers for all 3 required libraries
   - These come with the normal packages on some distributions (e.g. Arch)
   - On others (such as Debian), you'll have to get them manually
 

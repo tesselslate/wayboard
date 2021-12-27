@@ -1,6 +1,6 @@
 # configuration
 DESTINATION	= /usr/local
-CC 			= cc
+CC			= cc
 LD_FLAGS	= -lSDL2 -lX11 -lxcb
 
 # configuration (cflags)
