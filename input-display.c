@@ -1,5 +1,10 @@
-// input-display is a small application
-// to display your keyboard inputs on X11.
+/* ----------------------------
+   input-display
+   A small, simple application
+   for displaying keyboard
+   inputs on Linux.
+   ----------------------------
+ */
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
@@ -12,28 +17,32 @@
 #include <stdint.h>
 #include <stdio.h>
 
-// config types
+// ----------------------------
+// configuration types
+// ----------------------------
+
 typedef struct {
-    unsigned int x;
-    unsigned int y;
-    unsigned int w;
-    unsigned int h;
-    unsigned int keycode;
+    uint16_t x;
+    uint16_t y;
+    uint16_t w;
+    uint16_t h;
+
+    uint8_t keycode;
+    uint8_t active[3];
+    uint8_t inactive[3];
 } kbd_element;
 
 typedef struct {
-    uint8_t ar;
-    uint8_t ag;
-    uint8_t ab;
-    uint8_t ir;
-    uint8_t ig;
-    uint8_t ib;
+    uint8_t background[3];
 
     uint8_t element_count;
     kbd_element elements[256];
 } kbd_config;
 
+// ----------------------------
 // global state
+// ----------------------------
+
 kbd_config config;
 xcb_connection_t* connection;
 uint8_t keymap[256];
@@ -41,7 +50,10 @@ uint8_t keymap[256];
 SDL_Renderer* renderer;
 SDL_Window* window;
 
-// functions
+// ----------------------------
+// x11 keyboard grabber
+// ----------------------------
+
 int get_keymap(xcb_connection_t* conn) {
     // query keymap state
     xcb_query_keymap_cookie_t cookie = xcb_query_keymap(conn);
@@ -64,6 +76,10 @@ int get_keymap(xcb_connection_t* conn) {
         return 1;
     }
 }
+
+// ----------------------------
+// sdl functionality
+// ----------------------------
 
 int sdl_setup() {
     // initialize SDL
@@ -119,86 +135,56 @@ void sdl_loop() {
         get_keymap(connection);
 
         // render display
-        SDL_SetRenderDrawColor(renderer, config.ir, config.ig, config.ib, 255);
+        SDL_SetRenderDrawColor(renderer, 
+                config.background[0], 
+                config.background[1],
+                config.background[2],
+                255);
+
         SDL_RenderClear(renderer);
 
         for (int i = 0; i < config.element_count; i++) {
             kbd_element element = config.elements[i];
 
-            if (keymap[element.keycode] != 0) {
-                SDL_Rect rect;
-                rect.x = element.x;
-                rect.y = element.y;
-                rect.w = element.w;
-                rect.h = element.h;
+            SDL_Rect rect;
+            rect.x = element.x;
+            rect.y = element.y;
+            rect.w = element.w;
+            rect.h = element.h;
 
-                SDL_SetRenderDrawColor(renderer, config.ar, config.ag, config.ab, 255);
-                SDL_RenderFillRect(renderer, &rect);
+            if (keymap[element.keycode] != 0) {
+                SDL_SetRenderDrawColor(renderer, 
+                        element.active[0],
+                        element.active[1],
+                        element.active[2],
+                        255);
+            } else {
+                SDL_SetRenderDrawColor(renderer, 
+                        element.inactive[0], 
+                        element.inactive[1], 
+                        element.inactive[2], 
+                        255);
             }
+
+            SDL_RenderFillRect(renderer, &rect);
         }
         
         SDL_RenderPresent(renderer);
     }
 }
 
-void parse_hex(unsigned int color, uint8_t* r, uint8_t* g, uint8_t* b) {
-    *r = ((color >> 16) & 0xFF);
-    *g = ((color >> 8)  & 0xFF);
-    *b = ((color)       & 0xFF);
+// ----------------------------
+// configuration parser
+// ----------------------------
+
+void parse_hex(unsigned int color, uint8_t* out) {
+    out[0] = ((color >> 16) & 0xFF);
+    out[1] = ((color >> 8)  & 0xFF);
+    out[2] = ((color)       & 0xFF);
 }
 
 // run
-int main(int argc, char* argv[]) {
-    // parse config args
-    for (int i = 1; i < argc; i++) {
-        if (i == 1) {
-            // top-level configuration
-            config.element_count = argc - 2;
-            
-            unsigned int keycolor, bgcolor;
-            int scanned = sscanf(argv[1], "key=%x,background=%x", &keycolor, &bgcolor);
-
-            if (scanned != 2) {
-                fprintf(
-                        stderr, 
-                        "Failed to read initial configuration element. Scanned %u of 2 values\n", 
-                        scanned);
-
-                return 1;
-            }
-
-            parse_hex(keycolor, &config.ar, &config.ag, &config.ab);
-            parse_hex(bgcolor, &config.ir, &config.ig, &config.ib);
-        } else {
-            // keyboard element
-            kbd_element element;
-            int scanned = sscanf(
-                    argv[i], "key=%u,x=%u,y=%u,w=%u,h=%u",
-                    &element.keycode,
-                    &element.x,
-                    &element.y,
-                    &element.w,
-                    &element.h);
-
-            if (scanned != 5) {
-                fprintf(
-                        stderr, 
-                        "Failed to read element %u: scanned %u of 5 variables\n", 
-                        i, scanned);
-
-                fprintf(stderr, "%s", argv[i]);
-                return 1;
-            }
-
-            config.elements[i - 2] = element;
-        }
-    }
-
-    if (argc < 3) {
-        fprintf(stderr, "Configuration not specified.\n");
-        return 1;
-    }
-
+int main() {
     // establish xorg connection
     connection = xcb_connect(NULL, NULL);
 
