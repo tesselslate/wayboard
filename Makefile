@@ -1,11 +1,11 @@
 # configuration
-DESTINATION	= /usr/local
-CC			= cc
-LD_FLAGS	= -lconfig -lSDL2 -lX11 -lxcb
+DESTINATION = /usr/local
+CC          = cc
+LD_FLAGS    = -lconfig -lSDL2 -lSDL2_ttf -lX11 -lxcb -lm
 
 # configuration (cflags)
-#CFLAGS		= -fanalyzer -fsanitize=address -fsanitize=undefined -g -O0 -Wall -Wextra -Werror -pedantic
-CFLAGS		= -Os -Wall -Wextra -Werror -pedantic
+#CFLAGS      = -fsanitize=undefined -g -O0 -Wall -Wextra -Werror -pedantic
+CFLAGS       = -Os -Wall -Wextra -Werror -pedantic
 
 # tasks
 input-display:
