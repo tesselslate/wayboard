@@ -23,7 +23,7 @@ Then, do the following:
 For running `input-display`, you will need:
 - `libconfig`
 - `libx11` and `libxcb`
-- `sdl2`
+- `sdl2` and `sdl2_ttf`
 
 Additionally, for building `input-display`, you will need:
 - A C compiler toolchain (currently only tested with `gcc`)
@@ -33,5 +33,6 @@ Additionally, for building `input-display`, you will need:
   - On others (such as Debian), you'll have to get them manually
 
 # Planned Features
-- A configuration GUI
-- Add support for text/image rendering
+- [x] Add support for text rendering
+- [ ] Add support for image rendering
+- [ ] Add a graphical configuration utility
