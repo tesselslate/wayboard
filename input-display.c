@@ -316,7 +316,7 @@ int parse_config(config_t *conf) {
                         return 1;
                     }
 
-                    char* newtext = strdup(text);
+                    char *newtext = strdup(text);
                     if (newtext == NULL) {
                         fprintf(stderr, "Failed to copy text element string\n");
                         config_destroy(conf);
@@ -441,7 +441,7 @@ void cleanup() {
     TTF_Quit();
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
     // get arguments
     char *filename;
 
