@@ -3,8 +3,7 @@
    A small, simple application
    for displaying keyboard
    inputs on Linux.
-   ----------------------------
- */
+   ---------------------------- */
 
 #include <libconfig.h>
 #include <SDL2/SDL.h>
@@ -46,21 +45,21 @@ typedef struct {
 // ----------------------------
 
 kbd_config config;
-xcb_connection_t* connection;
+xcb_connection_t *connection;
 uint8_t keymap[256];
 
-SDL_Renderer* renderer;
-SDL_Window* window;
+SDL_Renderer *renderer;
+SDL_Window *window;
 
 // ----------------------------
 // x11 keyboard grabber
 // ----------------------------
 
-int get_keymap(xcb_connection_t* conn) {
+int get_keymap(xcb_connection_t *conn) {
     // query keymap state
     xcb_query_keymap_cookie_t cookie = xcb_query_keymap(conn);
-    xcb_generic_error_t* error = NULL;
-    xcb_query_keymap_reply_t* reply = xcb_query_keymap_reply(conn, cookie, &error);
+    xcb_generic_error_t *error = NULL;
+    xcb_query_keymap_reply_t *reply = xcb_query_keymap_reply(conn, cookie, &error);
 
     // update keymap array
     if (reply != NULL) {
@@ -74,7 +73,7 @@ int get_keymap(xcb_connection_t* conn) {
         free(reply);
         return 0;
     } else {
-        fprintf(stderr, "xcb_query_keymap_reply returned a null response.");
+        fprintf(stderr, "xcb_query_keymap_reply returned a null response.\n");
         return 1;
     }
 }
@@ -89,8 +88,8 @@ int sdl_setup() {
             SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_VIDEO);
     
     if (result != 0) {
-        const char* err = SDL_GetError();
-        fprintf(stderr, "SDL_Init error: %s", err);
+        const char *err = SDL_GetError();
+        fprintf(stderr, "SDL_Init error: %s\n", err);
         return 1;
     }
 
@@ -105,8 +104,8 @@ int sdl_setup() {
             160, 160, 0);
 
     if (window == NULL) {
-        const char* err = SDL_GetError();
-        fprintf(stderr, "SDL_CreateWindow error: %s", err);
+        const char *err = SDL_GetError();
+        fprintf(stderr, "SDL_CreateWindow error: %s\n", err);
         return 1;
     }
 
@@ -115,8 +114,8 @@ int sdl_setup() {
             window, -1, SDL_RENDERER_PRESENTVSYNC);
 
     if (renderer == NULL) {
-        const char* err = SDL_GetError();
-        fprintf(stderr, "SDL_CreateRenderer error: %s", err);
+        const char *err = SDL_GetError();
+        fprintf(stderr, "SDL_CreateRenderer error: %s\n", err);
         return 1;
     }
 
@@ -179,7 +178,7 @@ void sdl_loop() {
 // configuration parser
 // ----------------------------
 
-void parse_hex(const char* in, uint8_t* out) {
+void parse_hex(const char *in, uint8_t *out) {
     unsigned int r, g, b;
     sscanf(in, "%2x%2x%2x", &r, &g, &b);
 
@@ -245,12 +244,12 @@ int parse_config(config_t *conf) {
     return 0;
 }
 
-int read_confing_stream(FILE* stream) {
+int read_confing_stream(FILE *stream) {
     config_t conf;
     config_init(&conf);
 
     if (!config_read(&conf, stream)) {
-        fprintf(stderr, "Failed to read configuration stream: %s", 
+        fprintf(stderr, "Failed to read configuration stream: %s\n", 
                 config_error_text(&conf));
         config_destroy(&conf);
         return 1;
@@ -259,12 +258,13 @@ int read_confing_stream(FILE* stream) {
     return parse_config(&conf);
 }
 
-int read_config_file(char* path) {
+int read_config_file(char *path) {
     config_t conf;
     config_init(&conf);
 
     if (!config_read_file(&conf, path)) {
-        fprintf(stderr, "Failed to read configuration file: %s",
+        fprintf(stderr, "Failed to read configuration file (line %i): %s\n",
+                config_error_line(&conf),
                 config_error_text(&conf));
         config_destroy(&conf);
         return 1;
