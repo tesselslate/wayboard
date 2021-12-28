@@ -6,12 +6,14 @@
    ----------------------------
  */
 
+#include <libconfig.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_hints.h>
 #include <SDL2/SDL_rect.h>
 #include <SDL2/SDL_render.h>
 #include <SDL2/SDL_video.h>
+#include <stdlib.h>
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
 #include <stdint.h>
@@ -177,14 +179,107 @@ void sdl_loop() {
 // configuration parser
 // ----------------------------
 
-void parse_hex(unsigned int color, uint8_t* out) {
-    out[0] = ((color >> 16) & 0xFF);
-    out[1] = ((color >> 8)  & 0xFF);
-    out[2] = ((color)       & 0xFF);
+void parse_hex(const char* in, uint8_t* out) {
+    unsigned int r, g, b;
+    sscanf(in, "%2x%2x%2x", &r, &g, &b);
+
+    out[0] = (uint8_t) r;
+    out[1] = (uint8_t) g;
+    out[2] = (uint8_t) b;
 }
 
+int parse_config(config_t *conf) {
+    const char *string;
+    kbd_config new_conf;
+
+    // read background color
+    if (config_lookup_string(conf, "background", &string)) {
+        parse_hex(string, new_conf.background);
+    } else {
+        fprintf(stderr, "Could not find a background color in configuration.\n");
+        config_destroy(conf);
+        return 1;
+    }
+
+    // read keys
+    config_setting_t *keys = config_lookup(conf, "keys");
+    if (keys != NULL) {
+        int keycount = config_setting_length(keys);
+        new_conf.element_count = keycount;
+
+        for (int i = 0; i < keycount; i++) {
+            config_setting_t *key = config_setting_get_elem(keys, i);
+            const char *active, *inactive;
+            int x, y, w, h, keycode;
+
+            if (config_setting_lookup_string(key, "inactive", &inactive) &&
+                config_setting_lookup_string(key, "active", &active) &&
+                config_setting_lookup_int(key, "x", &x) &&
+                config_setting_lookup_int(key, "y", &y) &&
+                config_setting_lookup_int(key, "w", &w) &&
+                config_setting_lookup_int(key, "h", &h) &&
+                config_setting_lookup_int(key, "keycode", &keycode)) {
+                // put values into keyboard element
+                kbd_element *el = &new_conf.elements[i];
+
+                parse_hex(active, el->active);
+                parse_hex(inactive, el->inactive);
+                el->x = (uint8_t) x;
+                el->y = (uint8_t) y;
+                el->w = (uint8_t) w;
+                el->h = (uint8_t) h;
+                el->keycode = (uint8_t) keycode;
+            } else {
+                fprintf(stderr, "Failed to read key %i from configuration.\n", i);
+                config_destroy(conf);
+                return 1;
+            }
+        }
+    } else {
+        fprintf(stderr, "Could not find a 'keys' element in configuration.\n");
+        config_destroy(conf);
+        return 1;
+    }
+
+    config = new_conf;
+    return 0;
+}
+
+int read_confing_stream(FILE* stream) {
+    config_t conf;
+    config_init(&conf);
+
+    if (!config_read(&conf, stream)) {
+        fprintf(stderr, "Failed to read configuration stream: %s", 
+                config_error_text(&conf));
+        config_destroy(&conf);
+        return 1;
+    }
+
+    return parse_config(&conf);
+}
+
+int read_config_file(char* path) {
+    config_t conf;
+    config_init(&conf);
+
+    if (!config_read_file(&conf, path)) {
+        fprintf(stderr, "Failed to read configuration file: %s",
+                config_error_text(&conf));
+        config_destroy(&conf);
+        return 1;
+    }
+
+    return parse_config(&conf);
+}
+
+// ----------------------------
 // run
+// ----------------------------
+
 int main() {
+    read_config_file("./example.cfg");
+
     // establish xorg connection
     connection = xcb_connect(NULL, NULL);
 
