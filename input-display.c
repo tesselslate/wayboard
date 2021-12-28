@@ -207,6 +207,11 @@ int parse_config(config_t *conf) {
     config_setting_t *keys = config_lookup(conf, "keys");
     if (keys != NULL) {
         int keycount = config_setting_length(keys);
+        if (keycount > 256) {
+            fprintf(stderr, "Amount of keys cannot exceed 256.\n");
+            config_destroy(conf);
+            return 1;
+        }
         new_conf.element_count = keycount;
 
         for (int i = 0; i < keycount; i++) {
