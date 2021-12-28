@@ -17,8 +17,7 @@ Then, do the following:
 # Configuration
 `input-display` accepts configuration files in a human-readable format. You can see a sample with some additional documentation comments [here.](https://github.com/WoofWoofDoggo/input-display/blob/main/example.cfg)
 
-## Tip
-You can get keycodes using `xmodmap -pke`. If you want to find a specific letter or number, then try `xmodmap -pke | grep '= <letter/num>'`.
+**Tip:** You can get keycodes using `xmodmap -pke`. If you want to find a specific letter or number, then try `xmodmap -pke | grep '= <letter/num>'`.
 
 # Dependencies
 For running `input-display`, you will need:
