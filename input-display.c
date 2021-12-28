@@ -12,11 +12,14 @@
 #include <SDL2/SDL_rect.h>
 #include <SDL2/SDL_render.h>
 #include <SDL2/SDL_video.h>
-#include <stdlib.h>
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 // ----------------------------
 // configuration types
@@ -244,7 +247,7 @@ int parse_config(config_t *conf) {
     return 0;
 }
 
-int read_confing_stream(FILE *stream) {
+int read_config_stream(FILE *stream) {
     config_t conf;
     config_init(&conf);
 
@@ -277,8 +280,33 @@ int read_config_file(char *path) {
 // run
 // ----------------------------
 
-int main() {
-    read_config_file("./example.cfg");
+int main(int argc, char* argv[]) {
+    // get arguments
+    char *filename;
+
+    if (argc < 2) {
+        fprintf(stderr, "Not enough arguments.\n");
+        return 1;
+    }
+
+    filename = argv[1];
+
+    // check if config file exists and is a file
+    if (access(filename, F_OK) != 0) {
+        fprintf(stderr, "Configuration file does not exist.\n");
+        return 1;
+    }
+
+    struct stat file_stat;
+    stat(filename, &file_stat);
+    if (!S_ISREG(file_stat.st_mode)) {
+        fprintf(stderr, "Configuration file is a folder.\n");
+        return 1;
+    }
+
+    if (read_config_file(filename)) {
+        return 1;
+    }
 
     // establish xorg connection
     connection = xcb_connect(NULL, NULL);
