@@ -11,7 +11,10 @@
 #include <SDL2/SDL_hints.h>
 #include <SDL2/SDL_rect.h>
 #include <SDL2/SDL_render.h>
+#include <SDL2/SDL_pixels.h>
+#include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL_video.h>
+#include <string.h>
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
 #include <stdint.h>
@@ -26,6 +29,15 @@
 // ----------------------------
 
 typedef struct {
+    const char *text;
+    uint8_t active[3];
+    uint8_t inactive[3];
+
+    SDL_Texture *texture;
+    SDL_Surface *surface;
+} text_element;
+
+typedef struct {
     uint16_t x;
     uint16_t y;
     uint16_t w;
@@ -34,6 +46,8 @@ typedef struct {
     uint8_t keycode;
     uint8_t active[3];
     uint8_t inactive[3];
+
+    text_element *text;
 } kbd_element;
 
 typedef struct {
@@ -55,6 +69,8 @@ uint8_t keymap[256];
 
 SDL_Renderer *renderer;
 SDL_Window *window;
+
+TTF_Font *font;
 
 // ----------------------------
 // x11 keyboard grabber
@@ -87,7 +103,7 @@ int get_keymap(xcb_connection_t *conn) {
 // sdl functionality
 // ----------------------------
 
-int sdl_setup() {
+int sdl_init() {
     // initialize SDL
     int result = SDL_Init(
             SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_VIDEO);
@@ -98,6 +114,17 @@ int sdl_setup() {
         return 1;
     }
 
+    result = TTF_Init();
+    if (result != 0) {
+        const char *err = TTF_GetError();
+        fprintf(stderr, "TTF_Init error: %s\n", err);
+        return 1;
+    }
+    
+    return 0;
+}
+
+int sdl_setup() {
     // set window hints
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
 
@@ -127,6 +154,44 @@ int sdl_setup() {
     return 0;
 }
 
+void set_color(uint8_t *color) {
+    SDL_SetRenderDrawColor(renderer,
+            color[0],
+            color[1],
+            color[2],
+            255);
+}
+
+void draw_element(kbd_element element) {
+    SDL_Rect rect;
+    rect.x = element.x;
+    rect.y = element.y;
+    rect.w = element.w;
+    rect.h = element.h;
+
+    uint8_t *r_color;
+    uint8_t *t_color;
+    if (keymap[element.keycode] != 0) {
+        r_color = element.active;
+        if (element.text != NULL) {
+            t_color = element.text->active;
+        }
+    } else {
+        r_color = element.inactive;
+        if (element.text != NULL) {
+            t_color = element.text->inactive;
+        }
+    }
+
+    set_color(r_color);
+    SDL_RenderFillRect(renderer, &rect);
+    if (element.text != NULL && element.text->texture != NULL) {
+        SDL_SetTextureColorMod(element.text->texture, 
+                t_color[0], t_color[1], t_color[2]);
+        SDL_RenderCopy(renderer, element.text->texture, NULL, &rect);
+    }
+}
+
 void sdl_loop() {
     SDL_Event evt;
 
@@ -141,38 +206,11 @@ void sdl_loop() {
         get_keymap(connection);
 
         // render display
-        SDL_SetRenderDrawColor(renderer,
-                config.background[0],
-                config.background[1],
-                config.background[2],
-                255);
-
+        set_color(config.background);
         SDL_RenderClear(renderer);
 
         for (int i = 0; i < config.element_count; i++) {
-            kbd_element element = config.elements[i];
-
-            SDL_Rect rect;
-            rect.x = element.x;
-            rect.y = element.y;
-            rect.w = element.w;
-            rect.h = element.h;
-
-            if (keymap[element.keycode] != 0) {
-                SDL_SetRenderDrawColor(renderer,
-                        element.active[0],
-                        element.active[1],
-                        element.active[2],
-                        255);
-            } else {
-                SDL_SetRenderDrawColor(renderer,
-                        element.inactive[0],
-                        element.inactive[1],
-                        element.inactive[2],
-                        255);
-            }
-
-            SDL_RenderFillRect(renderer, &rect);
+            draw_element(config.elements[i]);
         }
         
         SDL_RenderPresent(renderer);
@@ -217,6 +255,19 @@ int parse_config(config_t *conf) {
         return 1;
     }
 
+    // read and load font (if necessary)
+    int fontsize;
+    if (config_lookup_string(conf, "font", &string) &&
+        config_lookup_int(conf, "fontsize", &fontsize)) {
+        font = TTF_OpenFont(string, fontsize);
+        if (font == NULL) {
+            const char *err = TTF_GetError();
+            fprintf(stderr, "Could not load font: %s\n", err);
+            config_destroy(conf);
+            return 1;
+        }
+    }
+
     // read keys
     config_setting_t *keys = config_lookup(conf, "keys");
     if (keys != NULL) {
@@ -250,6 +301,36 @@ int parse_config(config_t *conf) {
                 el->w = (uint8_t) w;
                 el->h = (uint8_t) h;
                 el->keycode = (uint8_t) keycode;
+
+                // check if there is text
+                const char *text, *t_active, *t_inactive;
+                if (config_setting_lookup_string(key, "text", &text) &&
+                    config_setting_lookup_string(key, "text_active", &t_active) &&
+                    config_setting_lookup_string(key, "text_inactive", &t_inactive)) {
+                    // put text values into keyboard element
+                    text_element *text_el = malloc(sizeof(text_element));
+                    if (text_el == NULL) {
+                        fprintf(stderr, "Failed to allocate memory for text element\n");
+                        config_destroy(conf);
+                        return 1;
+                    }
+
+                    char* newtext = strdup(text);
+                    if (newtext == NULL) {
+                        fprintf(stderr, "Failed to copy text element string\n");
+                        config_destroy(conf);
+                        return 1;
+                    }
+
+                    text_el->text = newtext;
+                    text_el->texture = NULL;
+                    parse_hex(t_active, text_el->active);
+                    parse_hex(t_inactive, text_el->inactive);
+
+                    el->text = text_el;
+                } else {
+                    el->text = NULL;
+                }
             } else {
                 fprintf(stderr, "Failed to read key %i from configuration.\n", i);
                 config_destroy(conf);
@@ -263,6 +344,7 @@ int parse_config(config_t *conf) {
     }
 
     config = new_conf;
+    config_destroy(conf);
     return 0;
 }
 
@@ -299,6 +381,27 @@ int read_config_file(char *path) {
 // run
 // ----------------------------
 
+void cleanup() {
+    // dispose of SDL and xcb resources
+    if (connection != NULL) {
+        xcb_disconnect(connection);
+    }
+
+    SDL_Quit();
+    TTF_Quit();
+
+    // clean up allocations from kbd_config
+    for (int i = 0; i < config.element_count; i++) {
+        kbd_element el = config.elements[i];
+        if (el.text != NULL) {
+            if (el.text->text != NULL) {
+                free((void*) el.text->text);
+            }
+            free((void*) el.text);
+        }
+    }
+}
+
 int main(int argc, char* argv[]) {
     // get arguments
     char *filename;
@@ -323,19 +426,26 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (read_config_file(filename)) {
-        return 1;
-    }
-
     // establish xorg connection
     connection = xcb_connect(NULL, NULL);
 
     // sdl initialization
-    int sdl_result = sdl_setup();
+    int sdl_result = sdl_init();
     if (sdl_result == 1) {
         // if sdl initialization failed, terminate
-        xcb_disconnect(connection);
-        SDL_Quit();
+        cleanup();
+        return 1;
+    }
+
+    // read configuration file
+    if (read_config_file(filename)) {
+        return 1;
+    }
+
+    // finish sdl setup
+    sdl_result = sdl_setup();
+    if (sdl_result == 1) {
+        cleanup();
         return 1;
     }
 
@@ -343,8 +453,7 @@ int main(int argc, char* argv[]) {
     sdl_loop();
 
     // dispose of resources and terminate
-    xcb_disconnect(connection);
-    SDL_Quit();
+    cleanup();
 
     return 0;
 }
