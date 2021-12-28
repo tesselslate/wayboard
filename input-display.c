@@ -5,6 +5,7 @@
    inputs on Linux.
    ---------------------------- */
 
+#include <SDL2/SDL_surface.h>
 #include <libconfig.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
@@ -14,12 +15,12 @@
 #include <SDL2/SDL_pixels.h>
 #include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL_video.h>
-#include <string.h>
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -323,7 +324,6 @@ int parse_config(config_t *conf) {
                     }
 
                     text_el->text = newtext;
-                    text_el->texture = NULL;
                     parse_hex(t_active, text_el->active);
                     parse_hex(t_inactive, text_el->inactive);
 
@@ -377,19 +377,41 @@ int read_config_file(char *path) {
     return parse_config(&conf);
 }
 
+int generate_font_textures() {
+    for (int i = 0; i < config.element_count; i++) {
+        if (config.elements[i].text != NULL) {
+            text_element *text_el = config.elements[i].text;
+            SDL_Color color = { 255, 255, 255, 255 };
+            if (font != NULL) {
+                text_el->surface = TTF_RenderUTF8_Blended(font, text_el->text, color);
+                if (text_el->surface != NULL) {
+                    text_el->texture = SDL_CreateTextureFromSurface(renderer, text_el->surface);
+                    if (text_el->texture == NULL) {
+                        const char *err = SDL_GetError();
+                        fprintf(stderr, "Failed to create text texture: %s\n", err);
+                        return 1;
+                    }
+                } else {
+                    const char *err = TTF_GetError();
+                    fprintf(stderr, "Failed to create text surface: %s\n", err);
+                    return 1;
+                }
+            } else {
+                const char *err = TTF_GetError();
+                fprintf(stderr, "Font not loaded: %s\n", err);
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
 // ----------------------------
 // run
 // ----------------------------
 
 void cleanup() {
-    // dispose of SDL and xcb resources
-    if (connection != NULL) {
-        xcb_disconnect(connection);
-    }
-
-    SDL_Quit();
-    TTF_Quit();
-
     // clean up allocations from kbd_config
     for (int i = 0; i < config.element_count; i++) {
         kbd_element el = config.elements[i];
@@ -397,9 +419,26 @@ void cleanup() {
             if (el.text->text != NULL) {
                 free((void*) el.text->text);
             }
+
+            if (el.text->texture != NULL) {
+                SDL_DestroyTexture(el.text->texture);
+            }
+
+            if (el.text->surface != NULL) {
+                SDL_FreeSurface(el.text->surface);
+            }
+
             free((void*) el.text);
         }
     }
+
+    // dispose of SDL and xcb resources
+    if (connection != NULL) {
+        xcb_disconnect(connection);
+    }
+
+    SDL_Quit();
+    TTF_Quit();
 }
 
 int main(int argc, char* argv[]) {
@@ -448,6 +487,9 @@ int main(int argc, char* argv[]) {
         cleanup();
         return 1;
     }
+
+    // generate any font textures, if needed
+    generate_font_textures();
 
     // start display loop
     sdl_loop();
