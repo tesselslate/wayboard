@@ -187,9 +187,33 @@ void draw_element(kbd_element element) {
     set_color(r_color);
     SDL_RenderFillRect(renderer, &rect);
     if (element.text != NULL && element.text->texture != NULL) {
+        // fit text into rectangle
+        SDL_Rect dst;
+        int iw, ih;
+        SDL_QueryTexture(element.text->texture, NULL, NULL, &iw, &ih);
+
+        // scale down width/height
+        double width_ratio, height_ratio, ratio;
+        width_ratio = (double) iw / (double) element.w;
+        height_ratio = (double) ih / (double) element.h;
+
+        if (width_ratio >= height_ratio) {
+            ratio = width_ratio;
+        } else {
+            ratio = height_ratio;
+        }
+
+        dst.w = iw / ratio;
+        dst.h = ih / ratio;
+
+        // center texture in rectangle
+        dst.x = rect.x + (rect.w - dst.w) / 2;
+        dst.y = rect.y + (rect.h - dst.h) / 2;
+
+        // render text
         SDL_SetTextureColorMod(element.text->texture, 
                 t_color[0], t_color[1], t_color[2]);
-        SDL_RenderCopy(renderer, element.text->texture, NULL, &rect);
+        SDL_RenderCopy(renderer, element.text->texture, NULL, &dst);
     }
 }
 
