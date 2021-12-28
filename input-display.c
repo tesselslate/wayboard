@@ -17,6 +17,7 @@
 #include <SDL2/SDL_video.h>
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,8 +35,11 @@ typedef struct {
     uint8_t active[3];
     uint8_t inactive[3];
 
-    SDL_Texture *texture;
-    SDL_Surface *surface;
+    SDL_Texture *texture_a;
+    SDL_Surface *surface_a;
+
+    SDL_Texture *texture_i;
+    SDL_Surface *surface_i;
 } text_element;
 
 typedef struct {
@@ -170,27 +174,21 @@ void draw_element(kbd_element element) {
     rect.w = element.w;
     rect.h = element.h;
 
-    uint8_t *r_color;
-    uint8_t *t_color;
-    if (keymap[element.keycode] != 0) {
-        r_color = element.active;
-        if (element.text != NULL) {
-            t_color = element.text->active;
-        }
-    } else {
-        r_color = element.inactive;
-        if (element.text != NULL) {
-            t_color = element.text->inactive;
-        }
-    }
-
-    set_color(r_color);
+    int active = keymap[element.keycode] != 0;
+    set_color(active ? element.active : element.inactive);
     SDL_RenderFillRect(renderer, &rect);
-    if (element.text != NULL && element.text->texture != NULL) {
+
+    if (element.text != NULL) {
+        SDL_Texture *texture = active 
+            ? element.text->texture_a 
+            : element.text->texture_i;
+
+        if (texture == NULL) return;
+
         // fit text into rectangle
         SDL_Rect dst;
         int iw, ih;
-        SDL_QueryTexture(element.text->texture, NULL, NULL, &iw, &ih);
+        SDL_QueryTexture(texture, NULL, NULL, &iw, &ih);
 
         // scale down width/height
         double width_ratio, height_ratio, ratio;
@@ -203,17 +201,15 @@ void draw_element(kbd_element element) {
             ratio = height_ratio;
         }
 
-        dst.w = iw / ratio;
-        dst.h = ih / ratio;
+        dst.w = iw / ceil(ratio);
+        dst.h = ih / ceil(ratio);
 
         // center texture in rectangle
         dst.x = rect.x + (rect.w - dst.w) / 2;
         dst.y = rect.y + (rect.h - dst.h) / 2;
 
         // render text
-        SDL_SetTextureColorMod(element.text->texture, 
-                t_color[0], t_color[1], t_color[2]);
-        SDL_RenderCopy(renderer, element.text->texture, NULL, &dst);
+        SDL_RenderCopy(renderer, texture, NULL, &dst);
     }
 }
 
@@ -401,16 +397,32 @@ int read_config_file(char *path) {
     return parse_config(&conf);
 }
 
+SDL_Color arr_to_color(uint8_t *color) {
+    SDL_Color col = { color[0], color[1], color[2], 255 };
+    return col;
+}
+
 int generate_font_textures() {
     for (int i = 0; i < config.element_count; i++) {
         if (config.elements[i].text != NULL) {
-            text_element *text_el = config.elements[i].text;
-            SDL_Color color = { 255, 255, 255, 255 };
+            kbd_element el = config.elements[i];
+            text_element *text_el = el.text;
+
+            SDL_Color fg_active = arr_to_color(el.text->active);
+            SDL_Color bg_active = arr_to_color(el.active);
+            SDL_Color fg_inactive = arr_to_color(el.text->inactive);
+            SDL_Color bg_inactive = arr_to_color(el.inactive);
+
             if (font != NULL) {
-                text_el->surface = TTF_RenderUTF8_Blended(font, text_el->text, color);
-                if (text_el->surface != NULL) {
-                    text_el->texture = SDL_CreateTextureFromSurface(renderer, text_el->surface);
-                    if (text_el->texture == NULL) {
+                text_el->surface_a = TTF_RenderUTF8_Shaded(font, text_el->text, 
+                        fg_active, bg_active);
+                text_el->surface_i = TTF_RenderUTF8_Shaded(font, text_el->text,
+                        fg_inactive, bg_inactive);
+
+                if (text_el->surface_a != NULL && text_el->surface_i != NULL) {
+                    text_el->texture_a = SDL_CreateTextureFromSurface(renderer, text_el->surface_a);
+                    text_el->texture_i = SDL_CreateTextureFromSurface(renderer, text_el->surface_i);
+                    if (text_el->texture_a == NULL || text_el->texture_i == NULL) {
                         const char *err = SDL_GetError();
                         fprintf(stderr, "Failed to create text texture: %s\n", err);
                         return 1;
@@ -440,17 +452,11 @@ void cleanup() {
     for (int i = 0; i < config.element_count; i++) {
         kbd_element el = config.elements[i];
         if (el.text != NULL) {
-            if (el.text->text != NULL) {
-                free((void*) el.text->text);
-            }
-
-            if (el.text->texture != NULL) {
-                SDL_DestroyTexture(el.text->texture);
-            }
-
-            if (el.text->surface != NULL) {
-                SDL_FreeSurface(el.text->surface);
-            }
+            if (el.text->text != NULL) free((void*) el.text->text);
+            if (el.text->texture_a != NULL) SDL_DestroyTexture(el.text->texture_a);
+            if (el.text->texture_i != NULL) SDL_DestroyTexture(el.text->texture_i);
+            if (el.text->surface_a != NULL) SDL_FreeSurface(el.text->surface_a);
+            if (el.text->surface_i != NULL) SDL_FreeSurface(el.text->surface_i);
 
             free((void*) el.text);
         }
