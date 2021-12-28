@@ -38,6 +38,8 @@ typedef struct {
 
 typedef struct {
     uint8_t background[3];
+    uint16_t width;
+    uint16_t height;
 
     uint8_t element_count;
     kbd_element elements[256];
@@ -104,7 +106,7 @@ int sdl_setup() {
             "Input Display", 
             SDL_WINDOWPOS_CENTERED, 
             SDL_WINDOWPOS_CENTERED, 
-            160, 160, 0);
+            config.width, config.height, 0);
 
     if (window == NULL) {
         const char *err = SDL_GetError();
@@ -199,6 +201,18 @@ int parse_config(config_t *conf) {
         parse_hex(string, new_conf.background);
     } else {
         fprintf(stderr, "Could not find a background color in configuration.\n");
+        config_destroy(conf);
+        return 1;
+    }
+
+    // read window width/height
+    int width, height;
+    if (config_lookup_int(conf, "width", &width) &&
+        config_lookup_int(conf, "height", &height)) {
+        new_conf.width = (uint16_t) width;
+        new_conf.height = (uint16_t) height;
+    } else {
+        fprintf(stderr, "Could not find a window width/height in configuration.\n");
         config_destroy(conf);
         return 1;
     }
