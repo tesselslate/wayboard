@@ -1,10 +1,10 @@
 # configuration
 DESTINATION	= /usr/local
 CC			= cc
-LD_FLAGS	= -lSDL2 -lX11 -lxcb
+LD_FLAGS	= -lconfig -lSDL2 -lX11 -lxcb
 
 # configuration (cflags)
-#CFLAGS		= -fanalyzer -fsanitize=undefined -g -O0 -Wall -Wextra -Werror -pedantic
+#CFLAGS		= -fanalyzer -fsanitize=address -fsanitize=undefined -g -O0 -Wall -Wextra -Werror -pedantic
 CFLAGS		= -Os -Wall -Wextra -Werror -pedantic
 
 # tasks
