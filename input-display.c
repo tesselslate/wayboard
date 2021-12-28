@@ -135,8 +135,8 @@ void sdl_loop() {
         get_keymap(connection);
 
         // render display
-        SDL_SetRenderDrawColor(renderer, 
-                config.background[0], 
+        SDL_SetRenderDrawColor(renderer,
+                config.background[0],
                 config.background[1],
                 config.background[2],
                 255);
@@ -153,16 +153,16 @@ void sdl_loop() {
             rect.h = element.h;
 
             if (keymap[element.keycode] != 0) {
-                SDL_SetRenderDrawColor(renderer, 
+                SDL_SetRenderDrawColor(renderer,
                         element.active[0],
                         element.active[1],
                         element.active[2],
                         255);
             } else {
-                SDL_SetRenderDrawColor(renderer, 
-                        element.inactive[0], 
-                        element.inactive[1], 
-                        element.inactive[2], 
+                SDL_SetRenderDrawColor(renderer,
+                        element.inactive[0],
+                        element.inactive[1],
+                        element.inactive[2],
                         255);
             }
 
