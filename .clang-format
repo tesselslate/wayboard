@@ -1,0 +1,6 @@
+AllowShortFunctionsOnASingleLine: Empty
+AlwaysBreakAfterReturnType: All
+IndentWidth: 4
+SortIncludes: true
+
+# vim:ft=yaml
