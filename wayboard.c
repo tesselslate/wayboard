@@ -420,6 +420,7 @@ read_config(const char *path) {
         panic("more than 256 keys");
     }
     config.count = count;
+    bool font_warning = false;
     for (int i = 0; i < count; i++) {
         int scancode;
         config_setting_t *key = config_setting_get_elem(keys, i);
@@ -432,10 +433,17 @@ read_config(const char *path) {
             int time_threshold;
             if (config_setting_lookup_int(key, "time_threshold", &time_threshold)) {
                 config.keys[i].time_threshold = time_threshold;
+                if (config.font == NULL && !font_warning) {
+                    font_warning = true;
+                    config.font = "";
+                    fprintf(stderr, "WARNING: No font specified.\n");
+                }
             }
             if (config_setting_lookup_string(key, "text", &str)) {
-                if (config.font == NULL) {
-                    panic("need font for text");
+                if (config.font == NULL && !font_warning) {
+                    font_warning = true;
+                    config.font = "";
+                    fprintf(stderr, "WARNING: No font specified.\n");
                 }
                 config.keys[i].text = strdup(str);
             }
@@ -475,6 +483,9 @@ main(int argc, char **argv) {
         const char *names[tll_length(font_names)];
         tll_foreach(font_names, iter) names[i++] = iter->item;
         font = fcft_from_name(1, names, NULL);
+        if (font == NULL) {
+            panic("no font loaded");
+        }
         tll_free(font_names);
     }
 
