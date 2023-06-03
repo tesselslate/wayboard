@@ -34,10 +34,14 @@ executable('wayboard',
   wl_proto_src, wl_proto_header,
   'wayboard.c',
   dependencies: [
-    cc.find_library('rt'),
-    dependency('libconfig'),
+    dependency('fcft'),
+    dependency('tllist'),
+
     dependency('libinput'),
     dependency('libudev'),
+
+    cc.find_library('rt'),
+    dependency('libconfig'),
     dependency('pixman-1'),
     dependency('wayland-client'),
   ],

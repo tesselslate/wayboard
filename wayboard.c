@@ -1,3 +1,37 @@
+/*
+ * wayboard: A keyboard input display for Wayland.
+ * Licensed under GPL v3.0 only.
+ *
+ * This file contains code from:
+ * - fcft : MIT (https://codeberg.org/dnkl/fcft/src/branch/master/example/main.c)
+ *   Copyright (c) 2019 Daniel Eklöf
+ *
+ * - hello-wayland : MIT (https://github.com/emersion/hello-wayland)
+ *   Copyright (c) 2018 emersion
+ *
+ * - wshowkeys : GPL3 (https://github.com/ammgws/wshowkeys)
+ *
+ * MIT License
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
 #include "wayboard.h"
 
 static struct libinput *libinput = NULL;
@@ -13,6 +47,7 @@ static struct xdg_wm_base *xdg_wm_base = NULL;
 static struct xdg_surface *xdg_surface = NULL;
 static struct xdg_toplevel *xdg_toplevel = NULL;
 
+static struct fcft_font *font = NULL;
 static pixman_image_t *pix = NULL;
 static int shm_fd = -1;
 static void *shm_data = NULL;
@@ -64,6 +99,8 @@ cleanup() {
         wl_buffer_destroy(wl_buffer);
     if (shm_fd != -1)
         close(shm_fd);
+    fcft_destroy(font);
+    fcft_fini();
 }
 
 static void
@@ -181,13 +218,11 @@ render_key(struct config_key *key, struct key_state *state) {
     bool active = state->last_release < state->last_press;
     uint64_t time_active = active ? 0 : state->last_release - state->last_press;
 
-    pixman_color_t border, foreground, text;
+    pixman_color_t foreground, text;
     if (active) {
-        border = config.border_active;
         foreground = config.foreground_active;
         text = config.text_active;
     } else {
-        border = config.border_inactive;
         foreground = config.foreground_inactive;
         text = config.text_inactive;
     }
@@ -198,13 +233,61 @@ render_key(struct config_key *key, struct key_state *state) {
                                      key->w,
                                      key->h,
                                  });
-    if (memcmp(&border, &foreground, sizeof(pixman_color_t)) != 0) {
-        // TODO: Draw border
-    }
+    char *text_str = NULL;
     if (key->time_threshold > 0 && !active) {
-        // TODO: Draw text
+        // TODO
     } else if (key->text != NULL) {
-        // TODO: Draw text
+        text_str = strdup(key->text);
+    }
+    if (text_str != NULL) {
+        // Convert to UTF-32.
+        char32_t *unicode = calloc(strlen(text_str) + 1, sizeof(char32_t));
+        mbstate_t state = {0};
+        const char *in = text_str;
+        const char *const end = text_str + strlen(text_str) + 1;
+        size_t ret = 0;
+        size_t len = 0;
+
+        while ((ret = mbrtoc32(&unicode[len], in, end - in, &state)) != 0) {
+            if (ret >= -3 && ret <= -1) {
+                break;
+            }
+            in += ret;
+            len++;
+        }
+
+        // Rasterize.
+        struct fcft_text_run *run =
+            fcft_rasterize_text_run_utf32(font, len, unicode, FCFT_SUBPIXEL_DEFAULT);
+        assert(run != NULL);
+        int width = 0;
+        int height = 0;
+        for (int i = 0; i < run->count; i++) {
+            width += run->glyphs[i]->advance.x;
+            if (run->glyphs[i]->height > height) {
+                height = run->glyphs[i]->height;
+            }
+        }
+        int x = key->x + (key->w - width) / 2;
+        int y = key->y + (key->h - height) / 2;
+
+        for (int i = 0; i < run->count; i++) {
+            const struct fcft_glyph *g = run->glyphs[i];
+            if (g == NULL) {
+                continue;
+            }
+            pixman_image_t *color = pixman_image_create_solid_fill(&text);
+            if (pixman_image_get_format(g->pix) == PIXMAN_a8r8g8b8) {
+                pixman_image_composite32(PIXMAN_OP_OVER, g->pix, NULL, pix, 0, 0, 0, 0, x + g->x,
+                                         y + font->ascent - g->y, g->width, g->height);
+            } else {
+                pixman_image_composite32(PIXMAN_OP_OVER, color, g->pix, pix, 0, 0, 0, 0, x + g->x,
+                                         y + font->ascent - g->y, g->width, g->height);
+            }
+            pixman_image_unref(color);
+            x += g->advance.x;
+        }
+        free(text_str);
     }
     wl_surface_damage_buffer(wl_surface, key->x, key->y, key->w, key->h);
 }
@@ -242,6 +325,10 @@ create_window() {
     wl_display_roundtrip(wl_display);
 
     pix = pixman_image_create_bits(PIXMAN_a8r8g8b8, config.width, config.height, shm_data, stride);
+    pixman_region32_t clip;
+    pixman_region32_init_rect(&clip, 0, 0, config.width, config.height);
+    pixman_image_set_clip_region32(pix, &clip);
+    pixman_region32_fini(&clip);
     render_clear_buffer();
     wl_surface_attach(wl_surface, wl_buffer, 0, 0);
     wl_surface_commit(wl_surface);
@@ -295,10 +382,8 @@ read_config(const char *path) {
         {"background", &config.background, false},
         {"foreground_active", &config.foreground_active, false},
         {"foreground_inactive", &config.foreground_inactive, false},
-        {"border_active", &config.border_active, true},
-        {"border_inactive", &config.border_inactive, true},
-        {"text_active", &config.border_active, true},
-        {"text_inactive", &config.border_inactive, true},
+        {"text_active", &config.text_active, true},
+        {"text_inactive", &config.text_inactive, true},
     };
     for (int i = 0; i < sizeof(base_colors) / sizeof(struct color); i++) {
         struct color color = base_colors[i];
@@ -311,9 +396,6 @@ read_config(const char *path) {
 
     if (config_lookup_string(&raw_config, "font", &str)) {
         config.font = strdup(str);
-        if (!config_lookup_int(&raw_config, "font_size", &config.font_size)) {
-            panic("missing font size");
-        }
     }
 
     if (!config_lookup_int(&raw_config, "width", &config.width) ||
@@ -344,6 +426,9 @@ read_config(const char *path) {
                 config.keys[i].time_threshold = time_threshold;
             }
             if (config_setting_lookup_string(key, "text", &str)) {
+                if (config.font == NULL) {
+                    panic("need font for text");
+                }
                 config.keys[i].text = strdup(str);
             }
         } else {
@@ -367,6 +452,7 @@ setup_libinput() {
 
 int
 main(int argc, char **argv) {
+    fcft_init(FCFT_LOG_COLORIZE_AUTO, false, FCFT_LOG_CLASS_DEBUG);
     // TODO: Implement root privilege dropping.
     setup_libinput();
 
@@ -374,6 +460,15 @@ main(int argc, char **argv) {
         fprintf(stderr, "USAGE: %s CONFIG_FILE\n", argv[0]);
     }
     read_config(argv[1]);
+    if (config.font != NULL) {
+        tll(const char *) font_names = tll_init();
+        tll_push_back(font_names, config.font);
+        size_t i = 0;
+        const char *names[tll_length(font_names)];
+        tll_foreach(font_names, iter) names[i++] = iter->item;
+        font = fcft_from_name(1, names, NULL);
+        tll_free(font_names);
+    }
 
     assert((wl_display = wl_display_connect(NULL)));
     assert((wl_registry = wl_display_get_registry(wl_display)));

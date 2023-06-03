@@ -1,5 +1,6 @@
 #include "xdg-shell.h"
 #include <errno.h>
+#include <fcft/fcft.h>
 #include <fcntl.h>
 #include <libconfig.h>
 #include <libinput.h>
@@ -11,9 +12,13 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <time.h>
+#include <tllist.h>
+#include <uchar.h>
 #include <unistd.h>
+#include <utf8proc.h>
 #include <wayland-client.h>
 
+#undef assert // tllist.h includes assert.h
 #define assert(expr) assert_impl(__func__, __LINE__, #expr, expr)
 #define panic(...) panic_impl(__func__, __LINE__, __VA_ARGS__)
 
@@ -26,11 +31,9 @@ struct config_key {
 
 struct config {
     char *font;
-    int font_size;
     int width, height;
     pixman_color_t background;
     pixman_color_t foreground_active, foreground_inactive;
-    pixman_color_t border_active, border_inactive;
     pixman_color_t text_active, text_inactive;
     struct config_key keys[256];
     uint8_t count;
