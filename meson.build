@@ -45,4 +45,5 @@ executable('wayboard',
     dependency('pixman-1'),
     dependency('wayland-client'),
   ],
+  install: true,
 )
