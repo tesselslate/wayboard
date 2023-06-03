@@ -3,6 +3,13 @@ project('wayboard', 'c',
   license : 'GPL3',
 )
 
+add_project_arguments(
+  [
+    '-Wno-unused-parameter',
+  ],
+  language: 'c',
+)
+
 wayland_protocols = dependency('wayland-protocols')
 wayland_scanner = dependency('wayland-scanner', native: true)
 

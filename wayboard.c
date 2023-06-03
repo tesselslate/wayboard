@@ -203,7 +203,7 @@ render_clear_buffer() {
 static void
 render_frame(uint32_t time) {
     wl_surface_attach(wl_surface, wl_buffer, 0, 0);
-    for (int i = 0; i < 256; i++) {
+    for (size_t i = 0; i < 256; i++) {
         if (updated[i]) {
             render_key(&config.keys[i], &states[i]);
             updated[i] = false;
@@ -218,7 +218,7 @@ render_key(struct config_key *key, struct key_state *state) {
     bool active = state->last_release < state->last_press;
     uint64_t time_active = (state->last_release - state->last_press) / 1000000;
     bool in_threshold = key->time_threshold > 0 && state->last_press != 0 &&
-                        time_active < key->time_threshold && !active;
+                        time_active < (uint64_t)key->time_threshold && !active;
 
     pixman_color_t foreground, text;
     if (active || (in_threshold && !state->on_last_frame)) {
@@ -254,7 +254,7 @@ render_key(struct config_key *key, struct key_state *state) {
         size_t len = 0;
 
         while ((ret = mbrtoc32(&unicode[len], in, end - in, &state)) != 0) {
-            if (ret >= -3 && ret <= -1) {
+            if (ret >= (size_t)-3 && ret <= (size_t)-1) {
                 break;
             }
             in += ret;
@@ -267,7 +267,7 @@ render_key(struct config_key *key, struct key_state *state) {
         assert(run != NULL);
         int width = 0;
         int height = 0;
-        for (int i = 0; i < run->count; i++) {
+        for (size_t i = 0; i < run->count; i++) {
             width += run->glyphs[i]->advance.x;
             if (run->glyphs[i]->height > height) {
                 height = run->glyphs[i]->height;
@@ -276,7 +276,7 @@ render_key(struct config_key *key, struct key_state *state) {
         int x = key->x + (key->w - width) / 2;
         int y = key->y + (key->h - height) / 2;
 
-        for (int i = 0; i < run->count; i++) {
+        for (size_t i = 0; i < run->count; i++) {
             const struct fcft_glyph *g = run->glyphs[i];
             if (g == NULL) {
                 continue;
@@ -337,7 +337,7 @@ create_window() {
     pixman_image_set_clip_region32(pix, &clip);
     pixman_region32_fini(&clip);
     render_clear_buffer();
-    for (int i = 0; i < config.count; i++) {
+    for (size_t i = 0; i < config.count; i++) {
         render_key(&config.keys[i], &states[i]);
     }
     wl_surface_attach(wl_surface, wl_buffer, 0, 0);
@@ -395,7 +395,7 @@ read_config(const char *path) {
         {"text_active", &config.text_active, true},
         {"text_inactive", &config.text_inactive, true},
     };
-    for (int i = 0; i < sizeof(base_colors) / sizeof(struct color); i++) {
+    for (size_t i = 0; i < sizeof(base_colors) / sizeof(struct color); i++) {
         struct color color = base_colors[i];
         if (config_lookup_string(&raw_config, color.name, &str)) {
             read_hex_value(str, color.data);
@@ -423,7 +423,7 @@ read_config(const char *path) {
     }
     config.count = count;
     bool font_warning = false;
-    for (int i = 0; i < count; i++) {
+    for (size_t i = 0; i < count; i++) {
         int scancode;
         config_setting_t *key = config_setting_get_elem(keys, i);
         if (config_setting_lookup_int(key, "x", &config.keys[i].x) &&
@@ -525,7 +525,7 @@ main(int argc, char **argv) {
                 uint64_t time = ts_now.tv_sec * 1000000000 + ts_now.tv_nsec;
 
                 struct key_state *key_state = NULL;
-                for (int i = 0; i < config.count; i++) {
+                for (size_t i = 0; i < config.count; i++) {
                     if (config.keys[i].scancode == key + 8) {
                         key_state = &states[i];
                         updated[i] = true;
