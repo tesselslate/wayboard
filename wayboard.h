@@ -26,7 +26,6 @@ struct config_key {
     char *text;
     int x, y, w, h;
     uint8_t scancode;
-    int time_threshold;
 };
 
 struct config {
@@ -35,13 +34,14 @@ struct config {
     pixman_color_t background;
     pixman_color_t foreground_active, foreground_inactive;
     pixman_color_t text_active, text_inactive;
+    int time_threshold, threshold_life;
     struct config_key keys[256];
     uint8_t count;
 };
 
 struct key_state {
     uint64_t last_press, last_release;
-    bool on_last_frame;
+    uint64_t unrender_at;
 };
 
 static void assert_impl(const char *func, const int line, const char *expr, bool expr_value);

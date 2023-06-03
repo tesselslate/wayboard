@@ -53,7 +53,7 @@ static int shm_fd = -1;
 static void *shm_data = NULL;
 
 static struct config config = {0};
-static uint32_t last_frame = 0;
+static uint64_t frame_count = 0;
 static bool stop = false;
 static struct key_state states[256] = {0};
 static bool updated[256] = {0};
@@ -99,7 +99,8 @@ cleanup() {
         wl_buffer_destroy(wl_buffer);
     if (shm_fd != -1)
         close(shm_fd);
-    fcft_destroy(font);
+    if (font != NULL)
+        fcft_destroy(font);
     fcft_fini();
 }
 
@@ -203,32 +204,33 @@ render_clear_buffer() {
 static void
 render_frame(uint32_t time) {
     wl_surface_attach(wl_surface, wl_buffer, 0, 0);
-    for (size_t i = 0; i < 256; i++) {
+    for (size_t i = 0; i < config.count; i++) {
         if (updated[i]) {
             render_key(&config.keys[i], &states[i]);
             updated[i] = false;
+        } else if (states[i].unrender_at == frame_count) {
+            render_key(&config.keys[i], &states[i]);
         }
     }
     wl_surface_commit(wl_surface);
-    last_frame = time;
+    frame_count++;
 }
 
 static void
 render_key(struct config_key *key, struct key_state *state) {
     bool active = state->last_release < state->last_press;
     uint64_t time_active = (state->last_release - state->last_press) / 1000000;
-    bool in_threshold = key->time_threshold > 0 && state->last_press != 0 &&
-                        time_active < (uint64_t)key->time_threshold && !active;
+    bool in_threshold = config.time_threshold > 0 && state->last_press != 0 &&
+                        time_active < (uint64_t)config.time_threshold && !active;
 
     pixman_color_t foreground, text;
-    if (active || (in_threshold && !state->on_last_frame)) {
+    if (active || (in_threshold && state->unrender_at != frame_count)) {
         foreground = config.foreground_active;
         text = config.text_active;
-        state->on_last_frame = true;
+        state->unrender_at = frame_count + config.threshold_life;
     } else {
         foreground = config.foreground_inactive;
         text = config.text_inactive;
-        state->on_last_frame = false;
     }
     pixman_image_fill_rectangles(PIXMAN_OP_SRC, pix, &foreground, 1,
                                  &(pixman_rectangle16_t){
@@ -238,7 +240,7 @@ render_key(struct config_key *key, struct key_state *state) {
                                      key->h,
                                  });
     char *text_str = NULL;
-    if (in_threshold) {
+    if (in_threshold && state->unrender_at != frame_count) {
         text_str = malloc(32);
         snprintf(text_str, 32, "%" PRIu64 " ms", time_active);
     } else if (key->text != NULL) {
@@ -421,8 +423,19 @@ read_config(const char *path) {
     if (count > 256) {
         panic("more than 256 keys");
     }
-    config.count = count;
+
     bool font_warning = false;
+    if (config_lookup_int(&raw_config, "time_threshold", &config.time_threshold)) {
+        if (config.font == NULL && !font_warning) {
+            font_warning = true;
+            config.font = "";
+            fprintf(stderr, "WARNING: No font specified.\n");
+        }
+        if (!config_lookup_int(&raw_config, "threshold_life", &config.threshold_life)) {
+            panic("no threshold_life value with a set time_threshold");
+        }
+    }
+    config.count = count;
     for (size_t i = 0; i < count; i++) {
         int scancode;
         config_setting_t *key = config_setting_get_elem(keys, i);
@@ -432,15 +445,6 @@ read_config(const char *path) {
             config_setting_lookup_int(key, "h", &config.keys[i].h) &&
             config_setting_lookup_int(key, "scancode", &scancode)) {
             config.keys[i].scancode = scancode;
-            int time_threshold;
-            if (config_setting_lookup_int(key, "time_threshold", &time_threshold)) {
-                config.keys[i].time_threshold = time_threshold;
-                if (config.font == NULL && !font_warning) {
-                    font_warning = true;
-                    config.font = "";
-                    fprintf(stderr, "WARNING: No font specified.\n");
-                }
-            }
             if (config_setting_lookup_string(key, "text", &str)) {
                 if (config.font == NULL && !font_warning) {
                     font_warning = true;
