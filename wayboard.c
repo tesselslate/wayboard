@@ -292,7 +292,9 @@ render_key(struct config_key *key, struct key_state *state) {
             pixman_image_unref(color);
             x += g->advance.x;
         }
+        free(unicode);
         free(text_str);
+        fcft_text_run_destroy(run);
     }
     wl_surface_damage_buffer(wl_surface, key->x, key->y, key->w, key->h);
 }
