@@ -470,12 +470,26 @@ setup_libinput() {
     }
     libinput_udev_assign_seat(libinput, seat);
     libinput_dispatch(libinput);
+
+    if (geteuid() == 0) {
+        printf("INFO: dropping root privileges (geteuid() == 0)\n");
+        if (setgid(getgid()) != 0) {
+            panic("drop root (setgid): %s", strerror(errno));
+        }
+        if (setuid(getuid()) != 0) {
+            panic("drop root (setuid): %s", strerror(errno));
+        }
+        if (setuid(0) == 0) {
+            panic("root privileges not dropped (use the setuid bit)");
+        } else {
+            printf("INFO: dropped root privileges\n");
+        }
+    }
 }
 
 int
 main(int argc, char **argv) {
-    fcft_init(FCFT_LOG_COLORIZE_AUTO, false, FCFT_LOG_CLASS_DEBUG);
-    // TODO: Implement root privilege dropping.
+    fcft_init(FCFT_LOG_COLORIZE_AUTO, false, FCFT_LOG_CLASS_WARNING);
     setup_libinput();
 
     if (argc != 2) {

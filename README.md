@@ -12,11 +12,18 @@ repository was previously home to an X11-based keyboard display. See the
 
 First, install the necessary [dependencies](#dependencies).
 
-```sh
-git clone https://github.com/woofdoggo/wayboard
-cd wayboard
-meson setup build
-ninja -C build install
+```
+$ git clone https://github.com/woofdoggo/wayboard
+$ cd wayboard
+$ meson setup build
+$ ninja -C build install
+```
+
+If your user is not a member of the `input` group, set the setuid bit on the
+`wayboard` binary.
+
+```
+# chmod u+s $(which wayboard)
 ```
 
 ## Dependencies
