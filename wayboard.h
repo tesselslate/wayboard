@@ -26,7 +26,7 @@ struct config_key {
     char *text;
     int x, y, w, h;
     uint8_t scancode;
-    double time_threshold;
+    int time_threshold;
 };
 
 struct config {

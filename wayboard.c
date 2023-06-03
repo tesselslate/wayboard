@@ -216,7 +216,6 @@ render_frame(uint32_t time) {
 static void
 render_key(struct config_key *key, struct key_state *state) {
     bool active = state->last_release < state->last_press;
-    uint64_t time_active = active ? 0 : state->last_release - state->last_press;
 
     pixman_color_t foreground, text;
     if (active) {
@@ -234,8 +233,10 @@ render_key(struct config_key *key, struct key_state *state) {
                                      key->h,
                                  });
     char *text_str = NULL;
-    if (key->time_threshold > 0 && !active) {
-        // TODO
+    uint64_t time_active = (state->last_release - state->last_press) / 1000000;
+    if (key->time_threshold > 0 && time_active < key->time_threshold && !active) {
+        text_str = malloc(32);
+        snprintf(text_str, 32, "%" PRIu64 " ms", time_active);
     } else if (key->text != NULL) {
         text_str = strdup(key->text);
     }
@@ -330,6 +331,9 @@ create_window() {
     pixman_image_set_clip_region32(pix, &clip);
     pixman_region32_fini(&clip);
     render_clear_buffer();
+    for (int i = 0; i < config.count; i++) {
+        render_key(&config.keys[i], &states[i]);
+    }
     wl_surface_attach(wl_surface, wl_buffer, 0, 0);
     wl_surface_commit(wl_surface);
 
@@ -421,8 +425,8 @@ read_config(const char *path) {
             config_setting_lookup_int(key, "h", &config.keys[i].h) &&
             config_setting_lookup_int(key, "scancode", &scancode)) {
             config.keys[i].scancode = scancode;
-            double time_threshold;
-            if (config_setting_lookup_float(key, "time_threshold", &time_threshold)) {
+            int time_threshold;
+            if (config_setting_lookup_int(key, "time_threshold", &time_threshold)) {
                 config.keys[i].time_threshold = time_threshold;
             }
             if (config_setting_lookup_string(key, "text", &str)) {
