@@ -29,11 +29,15 @@ foreach proto : wl_proto_xml
   )
 endforeach
 
+cc = meson.get_compiler('c')
 executable('wayboard',
   wl_proto_src, wl_proto_header,
   'wayboard.c',
   dependencies: [
+    cc.find_library('rt'),
     dependency('libconfig'),
+    dependency('libinput'),
+    dependency('libudev'),
     dependency('pixman-1'),
     dependency('wayland-client'),
   ],
