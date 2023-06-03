@@ -216,14 +216,19 @@ render_frame(uint32_t time) {
 static void
 render_key(struct config_key *key, struct key_state *state) {
     bool active = state->last_release < state->last_press;
+    uint64_t time_active = (state->last_release - state->last_press) / 1000000;
+    bool in_threshold = key->time_threshold > 0 && state->last_press != 0 &&
+                        time_active < key->time_threshold && !active;
 
     pixman_color_t foreground, text;
-    if (active) {
+    if (active || (in_threshold && !state->on_last_frame)) {
         foreground = config.foreground_active;
         text = config.text_active;
+        state->on_last_frame = true;
     } else {
         foreground = config.foreground_inactive;
         text = config.text_inactive;
+        state->on_last_frame = false;
     }
     pixman_image_fill_rectangles(PIXMAN_OP_SRC, pix, &foreground, 1,
                                  &(pixman_rectangle16_t){
@@ -233,8 +238,7 @@ render_key(struct config_key *key, struct key_state *state) {
                                      key->h,
                                  });
     char *text_str = NULL;
-    uint64_t time_active = (state->last_release - state->last_press) / 1000000;
-    if (key->time_threshold > 0 && time_active < key->time_threshold && !active) {
+    if (in_threshold) {
         text_str = malloc(32);
         snprintf(text_str, 32, "%" PRIu64 " ms", time_active);
     } else if (key->text != NULL) {

@@ -41,6 +41,7 @@ struct config {
 
 struct key_state {
     uint64_t last_press, last_release;
+    bool on_last_frame;
 };
 
 static void assert_impl(const char *func, const int line, const char *expr, bool expr_value);
