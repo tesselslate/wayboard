@@ -33,6 +33,8 @@ executable('wayboard',
   wl_proto_src, wl_proto_header,
   'wayboard.c',
   dependencies: [
+    dependency('libconfig'),
+    dependency('pixman-1'),
     dependency('wayland-client'),
   ],
 )
