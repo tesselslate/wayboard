@@ -1,47 +1,44 @@
 # wayboard
 
-`wayboard` is a libinput-based keyboard input display for Wayland. This
-repository was previously home to an X11-based keyboard display. See the
-`x11` tag if you are interested in that.
+`wayboard` is a libinput-based keyboard input display for Wayland.
 
-> **Disclaimer:** This is my first ever attempt at writing a program for
-> Wayland. I make no guarantees that it is functional, stable, or secure.
-> It may not work on more elaborate setups.
+> [!TIP]
+> This repository previously contained a keyboard display for X11. If you are
+> interested, take a look at the `x11` tag.
 
-# Installation
+# Building
 
-First, install the necessary [dependencies](#dependencies).
+The following dependencies are required only at build time:
 
-```
-$ git clone https://github.com/woofdoggo/wayboard
-$ cd wayboard
-$ meson setup build
-$ ninja -C build install
-```
+- `wayland-protocols`
 
-If your user is not a member of the `input` group, set the setuid bit on the
-`wayboard` binary.
-
-```
-# chmod u+s $(which wayboard)
-```
-
-## Dependencies
+The following dependencies are required for both building and running:
 
 - `fcft`
 - `libconfig`
 - `libinput`
 - `libudev`
 - `pixman`
-- `tllist`
-- `wayland-client` (`libwayland`)
+- `wayland-client`
 
-Build-only:
-- C compiler
-- `meson`
-- `wayland-protocols`
+To build wayboard, clone the repository and run `make install`.
+
+> [!IMPORTANT]
+> wayboard requires additional privileges to read keyboard input. If your user
+> is not a member of the `input` group, you can set the setuid bit on the
+> `wayboard` binary.
+>
+> ```
+> # chmod u+s $(which wayboard)
+> ```
+
+# License
+
+wayboard is licensed under the GNU General Public License v3 **only**, no later
+version. wayboard is partially based off of MIT-licensed code from other
+projects; see the source code for more information.
 
 # Configuration
 
-See the [example](https://github.com/woofdoggo/input-display/blob/main/example.cfg)
+See the [example](https://github.com/tesselslate/input-display/blob/main/example.cfg)
 configuration file.
