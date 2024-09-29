@@ -137,8 +137,8 @@ static int cfg_read_keys(struct cfg *cfg, config_t *conf);
 static int cfg_read_toplevel(struct cfg *cfg, config_t *conf);
 static void render_frame(struct wayboard *wb);
 static void render_key(struct wayboard *wb, uint32_t keycode);
-static void render_key_text(struct wayboard *wb, struct wb_key_state *ks, struct cfg_key *key,
-                            const pixman_color_t *text, const char *text_str);
+static void render_key_text(struct wayboard *wb, struct cfg_key *key, const pixman_color_t *text,
+                            const char *text_str);
 static inline uint64_t usec_now();
 static void wayboard_commit_frame(struct wayboard *wb, uint32_t time);
 static void wayboard_process_key(struct wayboard *wb, uint32_t keycode,
@@ -592,6 +592,14 @@ init_render(struct wayboard *wb) {
                                      wb->cfg.height,
                                  });
 
+    for (size_t i = 0; i < MAX_KEYS; i++) {
+        if (!wb->cfg.keys[i].text_inactive) {
+            continue;
+        }
+
+        render_key_text(wb, &wb->cfg.keys[i], &wb->cfg.txt_inactive, wb->cfg.keys[i].text_inactive);
+    }
+
     wl_surface_damage_buffer(wb->wl.surface, 0, 0, INT32_MAX, INT32_MAX);
     wayboard_commit_frame(wb, 0);
 
@@ -794,7 +802,7 @@ render_key(struct wayboard *wb, uint32_t keycode) {
 
     // Render text, if any should be shown.
     if (text_str != NULL) {
-        render_key_text(wb, ks, key, text, text_str);
+        render_key_text(wb, key, text, text_str);
     }
 
     // Damage the modified area of the buffer.
@@ -802,8 +810,8 @@ render_key(struct wayboard *wb, uint32_t keycode) {
 }
 
 static void
-render_key_text(struct wayboard *wb, struct wb_key_state *ks, struct cfg_key *key,
-                const pixman_color_t *text, const char *text_str) {
+render_key_text(struct wayboard *wb, struct cfg_key *key, const pixman_color_t *text,
+                const char *text_str) {
     // TODO: Cache rasterized text runs from fcft.
 
     // Convert the given text to UTF32.
