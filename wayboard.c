@@ -135,12 +135,18 @@ static int cfg_read_color(const char *color_str, pixman_color_t *out);
 static int cfg_read_colors(struct cfg *cfg, config_t *conf);
 static int cfg_read_keys(struct cfg *cfg, config_t *conf);
 static int cfg_read_toplevel(struct cfg *cfg, config_t *conf);
+static int init_fcft(struct wayboard *wb);
+static int init_libinput(struct wayboard *wb);
+static int init_read_config(struct wayboard *wb, const char *path);
+static int init_render(struct wayboard *wb);
+static int init_wayland(struct wayboard *wb);
 static void render_frame(struct wayboard *wb);
 static void render_key(struct wayboard *wb, uint32_t keycode);
 static void render_key_text(struct wayboard *wb, struct cfg_key *key, const pixman_color_t *text,
                             const char *text_str);
 static inline uint64_t usec_now();
 static void wayboard_commit_frame(struct wayboard *wb, uint32_t time);
+static void wayboard_fini_wl(struct wayboard *wb);
 static void wayboard_process_key(struct wayboard *wb, uint32_t keycode,
                                  enum libinput_key_state state, uint64_t usec);
 static int wayboard_process_libinput(struct wayboard *wb);
@@ -906,6 +912,18 @@ usec_now() {
 }
 
 static void
+wayboard_commit_frame(struct wayboard *wb, uint32_t time) {
+    wb->wl.frame_cb = wl_surface_frame(wb->wl.surface);
+    wl_callback_add_listener(wb->wl.frame_cb, &callback_frame_listener, wb);
+
+    wl_surface_attach(wb->wl.surface, wb->wl.buffer, 0, 0);
+    wl_surface_commit(wb->wl.surface);
+
+    wb->state.last_render = time;
+    wb->state.buf_released = false;
+}
+
+static void
 wayboard_fini_wl(struct wayboard *wb) {
     if (wb->wl.frame_cb) {
         wl_callback_destroy(wb->wl.frame_cb);
@@ -924,18 +942,6 @@ wayboard_fini_wl(struct wayboard *wb) {
     wl_compositor_destroy(wb->wl.compositor);
     wl_registry_destroy(wb->wl.registry);
     wl_display_disconnect(wb->wl.display);
-}
-
-static void
-wayboard_commit_frame(struct wayboard *wb, uint32_t time) {
-    wb->wl.frame_cb = wl_surface_frame(wb->wl.surface);
-    wl_callback_add_listener(wb->wl.frame_cb, &callback_frame_listener, wb);
-
-    wl_surface_attach(wb->wl.surface, wb->wl.buffer, 0, 0);
-    wl_surface_commit(wb->wl.surface);
-
-    wb->state.last_render = time;
-    wb->state.buf_released = false;
 }
 
 static void
