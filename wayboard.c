@@ -32,548 +32,1069 @@
  * SOFTWARE.
  */
 
-#include "wayboard.h"
+// Used for memfd_create
+#define _GNU_SOURCE
 
-static struct libinput *libinput = NULL;
-static struct udev *udev = NULL;
+#include "xdg-shell.h"
+#include <assert.h>
+#include <errno.h>
+#include <fcft/fcft.h>
+#include <fcntl.h>
+#include <libconfig.h>
+#include <libinput.h>
+#include <libudev.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/poll.h>
+#include <sys/timerfd.h>
+#include <time.h>
+#include <uchar.h>
+#include <unistd.h>
+#include <wayland-client-core.h>
+#include <wayland-client-protocol.h>
 
-static struct wl_buffer *wl_buffer = NULL;
-static struct wl_compositor *wl_compositor = NULL;
-static struct wl_display *wl_display = NULL;
-static struct wl_registry *wl_registry = NULL;
-static struct wl_shm *wl_shm = NULL;
-static struct wl_surface *wl_surface = NULL;
-static struct xdg_wm_base *xdg_wm_base = NULL;
-static struct xdg_surface *xdg_surface = NULL;
-static struct xdg_toplevel *xdg_toplevel = NULL;
+#define ARRAY_LEN(x) ((sizeof((x)) / sizeof(*(x))))
+#define KEY_DEFINED(wb, code) ((wb)->cfg.keys[(code)].w != 0)
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 
-static struct fcft_font *font = NULL;
-static pixman_image_t *pix = NULL;
-static int shm_fd = -1;
-static void *shm_data = NULL;
+#define MAX_KEYS 256
 
-static struct config config = {0};
-static uint64_t frame_count = 0;
-static bool stop = false;
-static struct key_state states[256] = {0};
-static bool updated[256] = {0};
+struct cfg {
+    // Appearance
+    int width, height;
+    pixman_color_t background;
+    pixman_color_t fg_active, fg_inactive;
+    pixman_color_t txt_active, txt_inactive;
+    char *font;
 
-static const struct libinput_interface libinput_interface = {
-    .close_restricted = libinput_close_restricted,
-    .open_restricted = libinput_open_restricted,
+    // Function
+    int time_threshold; // maximum duration to show keypress length
+    int threshold_life; // number of ms to show keypress length for
+
+    // Layout
+    struct cfg_key {
+        int x, y, w, h;
+        char *text_active, *text_inactive;
+    } keys[MAX_KEYS];
 };
 
-static const struct wl_registry_listener wl_registry_listener = {
-    .global = wl_registry_on_global,
-    .global_remove = wl_registry_on_global_remove,
+struct wayboard {
+    // Configuration
+    struct cfg cfg;
+    struct fcft_font *font;
+
+    // libinput state
+    struct libinput *libinput;
+    struct udev *udev;
+
+    // Wayland state
+    struct {
+        struct wl_display *display;
+        struct wl_registry *registry;
+
+        struct wl_compositor *compositor;
+        struct wl_shm *shm;
+        struct xdg_wm_base *xdg_wm_base;
+
+        struct wl_buffer *buffer;
+        struct wl_surface *surface;
+        struct xdg_surface *xdg_surface;
+        struct xdg_toplevel *xdg_toplevel;
+
+        struct wl_callback *frame_cb;
+    } wl;
+
+    // General state
+    struct {
+        pixman_image_t *pixman_image;
+        int shm_fd;
+        void *shm_data;
+        bool buf_released;
+
+        bool should_close;
+        uint32_t last_render;
+
+        struct wb_key_state {
+            uint64_t last_press_usec, last_release_usec;
+            uint64_t unrender_at_usec;
+        } keys[MAX_KEYS];
+    } state;
 };
 
-static const struct wl_callback_listener wl_surface_frame_listener = {
-    .done = wl_surface_frame_done,
-};
+static const struct wl_buffer_listener buffer_listener;
+static const struct wl_callback_listener callback_frame_listener;
+static const struct wl_registry_listener registry_listener;
+static const struct xdg_wm_base_listener xdg_wm_base_listener;
+static const struct xdg_surface_listener xdg_surface_listener;
+static const struct xdg_toplevel_listener xdg_toplevel_listener;
 
-static const struct xdg_surface_listener xdg_surface_listener = {
-    .configure = xdg_surface_on_configure,
-};
-
-static const struct xdg_toplevel_listener xdg_toplevel_listener = {
-    .close = xdg_toplevel_on_close,
-    .configure = xdg_toplevel_on_configure,
-    .wm_capabilities = xdg_toplevel_on_wm_capabilities,
-    //.configure_bounds
-};
-
-static const struct xdg_wm_base_listener xdg_wm_base_listener = {
-    .ping = xdg_wm_base_on_ping,
-};
+static void cfg_destroy(struct cfg *cfg);
+static int cfg_read(struct cfg *cfg, config_t *conf);
+static int cfg_read_color(const char *color_str, pixman_color_t *out);
+static int cfg_read_colors(struct cfg *cfg, config_t *conf);
+static int cfg_read_keys(struct cfg *cfg, config_t *conf);
+static int cfg_read_toplevel(struct cfg *cfg, config_t *conf);
+static void render_frame(struct wayboard *wb);
+static void render_key(struct wayboard *wb, uint32_t keycode);
+static void render_key_text(struct wayboard *wb, struct wb_key_state *ks, struct cfg_key *key,
+                            const pixman_color_t *text, const char *text_str);
+static inline uint64_t usec_now();
+static void wayboard_commit_frame(struct wayboard *wb, uint32_t time);
+static void wayboard_process_key(struct wayboard *wb, uint32_t keycode,
+                                 enum libinput_key_state state, uint64_t usec);
+static int wayboard_process_libinput(struct wayboard *wb);
+static int wayboard_run(struct wayboard *wb);
+static void wayboard_spin_buffer_release(struct wayboard *wb);
 
 static void
-cleanup() {
-    if (xdg_toplevel != NULL)
-        xdg_toplevel_destroy(xdg_toplevel);
-    if (xdg_surface != NULL)
-        xdg_surface_destroy(xdg_surface);
-    if (wl_surface != NULL)
-        wl_surface_destroy(wl_surface);
-    if (wl_buffer != NULL)
-        wl_buffer_destroy(wl_buffer);
-    if (shm_fd != -1)
-        close(shm_fd);
-    if (font != NULL)
-        fcft_destroy(font);
-    fcft_fini();
+on_buffer_release(void *data, struct wl_buffer *buffer) {
+    struct wayboard *wb = data;
+
+    wb->state.buf_released = true;
 }
 
+static const struct wl_buffer_listener buffer_listener = {
+    .release = on_buffer_release,
+};
+
 static void
-assert_impl(const char *func, const int line, const char *expr, bool expr_value) {
-    if (!expr_value) {
-        cleanup();
-        fprintf(stderr, "[%s:%d] assert failed: '%s'\n", func, line, expr);
-        exit(1);
+on_callback_frame_done(void *data, struct wl_callback *callback, uint32_t time) {
+    struct wayboard *wb = data;
+
+    render_frame(wb);
+
+    wayboard_commit_frame(wb, time);
+    wl_callback_destroy(callback);
+}
+
+static const struct wl_callback_listener callback_frame_listener = {
+    .done = on_callback_frame_done,
+};
+
+static void
+on_registry_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface,
+                   uint32_t version) {
+    static const int USE_COMPOSITOR_VERSION = WL_SURFACE_DAMAGE_BUFFER_SINCE_VERSION;
+    static const int USE_SHM_VERSION = 1;
+    static const int USE_XDG_WM_BASE_VERSION = XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION;
+
+    struct wayboard *wb = data;
+
+    if (strcmp(interface, wl_compositor_interface.name) == 0) {
+        if (version < USE_COMPOSITOR_VERSION) {
+            fprintf(stderr, "outdated %s: expected v%d, got v%d\n", wl_compositor_interface.name,
+                    USE_COMPOSITOR_VERSION, version);
+            return;
+        }
+
+        wb->wl.compositor =
+            wl_registry_bind(registry, name, &wl_compositor_interface, USE_COMPOSITOR_VERSION);
+        assert(wb->wl.compositor);
+    } else if (strcmp(interface, wl_shm_interface.name) == 0) {
+        if (version < USE_SHM_VERSION) {
+            fprintf(stderr, "outdated %s: expected v%d, got v%d\n", wl_shm_interface.name,
+                    USE_SHM_VERSION, version);
+            return;
+        }
+
+        wb->wl.shm = wl_registry_bind(registry, name, &wl_shm_interface, USE_SHM_VERSION);
+        assert(wb->wl.shm);
+    } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
+        if (version < USE_XDG_WM_BASE_VERSION) {
+            fprintf(stderr, "outdated %s: expected v%d, got v%d\n", xdg_wm_base_interface.name,
+                    USE_XDG_WM_BASE_VERSION, version);
+            return;
+        }
+
+        wb->wl.xdg_wm_base =
+            wl_registry_bind(registry, name, &xdg_wm_base_interface, USE_XDG_WM_BASE_VERSION);
+        assert(wb->wl.xdg_wm_base);
+
+        xdg_wm_base_add_listener(wb->wl.xdg_wm_base, &xdg_wm_base_listener, wb);
     }
 }
 
-static _Noreturn void
-panic_impl(const char *func, const int line, const char *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    fprintf(stderr, "[%s:%d] panic: ", func, line);
-    vfprintf(stderr, fmt, args);
-    fprintf(stderr, "\n");
-    va_end(args);
+static void
+on_registry_global_remove(void *data, struct wl_registry *registry, uint32_t name) {
+    // Unused.
+}
 
-    cleanup();
-    exit(1);
+static const struct wl_registry_listener registry_listener = {
+    .global = on_registry_global,
+    .global_remove = on_registry_global_remove,
+};
+
+static void
+on_xdg_wm_base_ping(void *data, struct xdg_wm_base *xdg_wm_base, uint32_t serial) {
+    xdg_wm_base_pong(xdg_wm_base, serial);
+}
+
+static const struct xdg_wm_base_listener xdg_wm_base_listener = {
+    .ping = on_xdg_wm_base_ping,
+};
+
+static void
+on_xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, uint32_t serial) {
+    struct wayboard *wb = data;
+
+    xdg_surface_ack_configure(xdg_surface, serial);
+    wl_surface_commit(wb->wl.surface);
+}
+
+static const struct xdg_surface_listener xdg_surface_listener = {
+    .configure = on_xdg_surface_configure,
+};
+
+static void
+on_xdg_toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel) {
+    struct wayboard *wb = data;
+
+    wb->state.should_close = true;
 }
 
 static void
-libinput_close_restricted(int fd, void *data) {
+on_xdg_toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel, int32_t width,
+                          int32_t height, struct wl_array *states) {
+    // Unused.
+}
+
+static void
+on_xdg_toplevel_configure_bounds(void *data, struct xdg_toplevel *xdg_toplevel, int32_t width,
+                                 int32_t height) {
+    // Unused.
+}
+
+static const struct xdg_toplevel_listener xdg_toplevel_listener = {
+    .close = on_xdg_toplevel_close,
+    .configure = on_xdg_toplevel_configure,
+    .configure_bounds = on_xdg_toplevel_configure_bounds,
+};
+
+static void
+libinput_iface_close_restricted(int fd, void *data) {
     close(fd);
 }
 
 static int
-libinput_open_restricted(const char *path, int flags, void *data) {
+libinput_iface_open_restricted(const char *path, int flags, void *data) {
     int fd = open(path, flags);
-    return fd < 0 ? -errno : fd;
+    return fd > 0 ? fd : -errno;
 }
 
+static const struct libinput_interface libinput_iface = {
+    .close_restricted = libinput_iface_close_restricted,
+    .open_restricted = libinput_iface_open_restricted,
+};
+
 static void
-wl_registry_on_global(void *data, struct wl_registry *registry, uint32_t name,
-                      const char *interface, uint32_t version) {
-    if (strcmp(interface, wl_compositor_interface.name) == 0) {
-        wl_compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 6);
-    } else if (strcmp(interface, wl_shm_interface.name) == 0) {
-        wl_shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
-    } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
-        xdg_wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface, 5);
+cfg_destroy(struct cfg *cfg) {
+    free(cfg->font);
+
+    for (size_t i = 0; i < ARRAY_LEN(cfg->keys); i++) {
+        if (cfg->keys[i].text_active) {
+            free(cfg->keys[i].text_active);
+        }
+        if (cfg->keys[i].text_inactive) {
+            free(cfg->keys[i].text_inactive);
+        }
     }
 }
 
-static void
-wl_registry_on_global_remove(void *data, struct wl_registry *registry, uint32_t name) {
-    // Noop. TODO
+static int
+cfg_read(struct cfg *cfg, struct config_t *conf) {
+    if (cfg_read_colors(cfg, conf) != 0) {
+        return 1;
+    }
+
+    if (cfg_read_toplevel(cfg, conf) != 0) {
+        return 1;
+    }
+
+    if (cfg_read_keys(cfg, conf) != 0) {
+        free(cfg->font);
+        return 1;
+    }
+
+    return 0;
 }
 
-static void
-wl_surface_frame_done(void *data, struct wl_callback *cb, uint32_t time) {
-    wl_callback_destroy(cb);
-    cb = wl_surface_frame(wl_surface);
-    wl_callback_add_listener(cb, &wl_surface_frame_listener, NULL);
-    render_frame(time);
+static int
+cfg_read_color(const char *color_str, pixman_color_t *out) {
+    size_t len = strlen(color_str);
+    if (color_str[0] == '#') {
+        len--;
+        color_str++;
+    }
+
+    unsigned int r, g, b, a;
+    size_t n = 0;
+    switch (len) {
+    case 6:
+        n = sscanf(color_str, "%2x%2x%2x", &r, &g, &b);
+        a = 255;
+        break;
+    case 8:
+        n = sscanf(color_str, "%2x%2x%2x%2x", &r, &g, &b, &a);
+        break;
+    default:
+        return 1;
+    }
+    if (n != len / 2) {
+        return 1;
+    }
+
+    out->red = r * 256;
+    out->green = g * 256;
+    out->blue = b * 256;
+    out->alpha = a * 256;
+    return 0;
 }
 
-static void
-xdg_surface_on_configure(void *data, struct xdg_surface *xdg_surface, uint32_t serial) {
-    xdg_surface_ack_configure(xdg_surface, serial);
-    wl_surface_commit(wl_surface);
+static int
+cfg_read_colors(struct cfg *cfg, config_t *conf) {
+    const char *color_str;
+
+    const struct config_color {
+        const char *name;
+        pixman_color_t *out;
+        bool optional;
+    } colors[] = {
+        {"background", &cfg->background, false},
+        {"foreground_active", &cfg->fg_active, false},
+        {"foreground_inactive", &cfg->fg_inactive, false},
+        {"text_active", &cfg->txt_active, true},
+        {"text_inactive", &cfg->txt_inactive, true},
+    };
+    for (size_t i = 0; i < ARRAY_LEN(colors); i++) {
+        const struct config_color *color = &colors[i];
+
+        if (!config_lookup_string(conf, color->name, &color_str)) {
+            if (color->optional) {
+                continue;
+            }
+
+            fprintf(stderr, "no '%s' property set in config\n", color->name);
+            return 1;
+        }
+
+        if (cfg_read_color(color_str, color->out) != 0) {
+            fprintf(stderr, "invalild color '%s' for property '%s'", color_str, color->name);
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
-static void
-xdg_toplevel_on_close(void *data, struct xdg_toplevel *xdg_toplevel) {
-    stop = true;
+static int
+cfg_read_keys(struct cfg *cfg, config_t *conf) {
+    config_setting_t *keys = config_lookup(conf, "keys");
+    if (!keys) {
+        fprintf(stderr, "no 'keys' table set in config\n");
+        return 1;
+    }
+
+    size_t num_keys = config_setting_length(keys);
+    bool keys_set[MAX_KEYS] = {0};
+    size_t i = 0;
+    for (i = 0; i < num_keys; i++) {
+        config_setting_t *key = config_setting_get_elem(keys, i);
+        assert(key);
+
+        int code;
+        if (!config_setting_lookup_int(key, "scancode", &code)) {
+            fprintf(stderr, "no 'scancode' property set on key %zu in config\n", i);
+            goto fail_key;
+        }
+        if (code < 0 || code >= MAX_KEYS) {
+            fprintf(stderr, "invalid 'scancode' property %d set on key %zu in config\n", code, i);
+            goto fail_key;
+        }
+
+        if (keys_set[code]) {
+            fprintf(stderr, "more than one key uses scancode %d\n", code);
+            goto fail_key;
+        }
+        keys_set[code] = true;
+
+        if (!config_setting_lookup_int(key, "x", &cfg->keys[code].x)) {
+            fprintf(stderr, "no 'x' property set on key %zu in config\n", i);
+            goto fail_key;
+        }
+        if (!config_setting_lookup_int(key, "y", &cfg->keys[code].y)) {
+            fprintf(stderr, "no 'y' property set on key %zu in config\n", i);
+            goto fail_key;
+        }
+        if (!config_setting_lookup_int(key, "w", &cfg->keys[code].w)) {
+            fprintf(stderr, "no 'w' property set on key %zu in config\n", i);
+            goto fail_key;
+        }
+        if (!config_setting_lookup_int(key, "h", &cfg->keys[code].h)) {
+            fprintf(stderr, "no 'h' property set on key %zu in config\n", i);
+            goto fail_key;
+        }
+
+        const char *text_str;
+        if (config_setting_lookup_string(key, "text_active", &text_str)) {
+            cfg->keys[code].text_active = strdup(text_str);
+            assert(cfg->keys[code].text_active);
+        }
+        if (config_setting_lookup_string(key, "text_inactive", &text_str)) {
+            cfg->keys[code].text_inactive = strdup(text_str);
+            assert(cfg->keys[code].text_inactive);
+        }
+    }
+
+    return 0;
+
+fail_key:
+    for (size_t j = 0; j < i; j++) {
+        if (cfg->keys[j].text_active) {
+            free(cfg->keys[j].text_active);
+        }
+        if (cfg->keys[j].text_inactive) {
+            free(cfg->keys[j].text_inactive);
+        }
+    }
+
+    return 1;
 }
 
-static void
-xdg_toplevel_on_configure(void *data, struct xdg_toplevel *xdg_toplevel, int32_t width,
-                          int32_t height, struct wl_array *states) {
-    // Noop
+static int
+cfg_read_toplevel(struct cfg *cfg, config_t *conf) {
+    const char *font_str;
+    if (!config_lookup_string(conf, "font", &font_str)) {
+        fprintf(stderr, "no 'font' property set in config\n");
+        return 1;
+    }
+    cfg->font = strdup(font_str);
+    assert(cfg->font);
+
+    if (!config_lookup_int(conf, "width", &cfg->width)) {
+        fprintf(stderr, "no 'width' property set in config\n");
+        goto fail_width;
+    }
+    if (!config_lookup_int(conf, "height", &cfg->height)) {
+        fprintf(stderr, "no 'height' property set in config\n");
+        goto fail_height;
+    }
+    if (cfg->width < 0 || cfg->height < 0 || cfg->width > 4096 || cfg->height > 4096) {
+        fprintf(stderr, "invalid window size (%dx%d) set in config\n", cfg->width, cfg->height);
+        goto fail_size;
+    }
+
+    bool has_time_threshold = config_lookup_int(conf, "time_threshold", &cfg->time_threshold);
+    bool has_threshold_life = config_lookup_int(conf, "threshold_life", &cfg->threshold_life);
+    if (has_time_threshold != has_threshold_life) {
+        fprintf(stderr, "did not set both 'time_threshold' and 'threshold_life' properties\n");
+        goto fail_threshold;
+    }
+
+    return 0;
+
+fail_threshold:
+fail_size:
+fail_height:
+fail_width:
+    free(cfg->font);
+    return 1;
 }
 
-static void
-xdg_toplevel_on_wm_capabilities(void *data, struct xdg_toplevel *xdg_toplevel,
-                                struct wl_array *capabilities) {
-    // Noop
+static int
+init_fcft(struct wayboard *wb) {
+    if (!fcft_init(FCFT_LOG_COLORIZE_AUTO, false, FCFT_LOG_CLASS_WARNING)) {
+        fprintf(stderr, "failed to initialize fcft\n");
+        return 1;
+    }
+
+    // SAFETY: init_read_config ensures that `cfg->font` is non-NULL.
+    const char *names[] = {wb->cfg.font};
+    wb->font = fcft_from_name(1, names, NULL);
+    if (!wb->font) {
+        fprintf(stderr, "failed to load font '%s'\n", wb->cfg.font);
+        fcft_fini();
+        return 1;
+    }
+
+    return 0;
 }
 
-static void
-xdg_wm_base_on_ping(void *data, struct xdg_wm_base *xdg_wm_base, uint32_t serial) {
-    xdg_wm_base_pong(xdg_wm_base, serial);
+static int
+init_libinput(struct wayboard *wb) {
+    wb->udev = udev_new();
+    if (!wb->udev) {
+        fprintf(stderr, "failed to initialize udev\n");
+        return 1;
+    }
+
+    wb->libinput = libinput_udev_create_context(&libinput_iface, &wb, wb->udev);
+    if (!wb->libinput) {
+        fprintf(stderr, "failed to initialize libinput\n");
+        goto fail_context;
+    }
+
+    const char *seat = getenv("XDG_SEAT");
+    if (!seat) {
+        seat = "seat0";
+    }
+    if (libinput_udev_assign_seat(wb->libinput, seat) != 0) {
+        fprintf(stderr, "failed to assign seat to libinput context\n");
+        goto fail_seat;
+    }
+    int err = libinput_dispatch(wb->libinput);
+    if (err != 0) {
+        fprintf(stderr, "failed to dispatch libinput: %s\n", strerror(-err));
+        goto fail_dispatch;
+    }
+
+    return 0;
+
+fail_dispatch:
+fail_seat:
+    libinput_unref(wb->libinput);
+
+fail_context:
+    udev_unref(wb->udev);
+    return 1;
 }
 
-static void
-render_clear_buffer() {
-    pixman_image_fill_rectangles(PIXMAN_OP_SRC, pix, &config.background, 1,
+static int
+init_read_config(struct wayboard *wb, const char *path) {
+    config_t conf;
+    config_init(&conf);
+    if (config_read_file(&conf, path) != CONFIG_TRUE) {
+        fprintf(stderr, "failed to read config file\n");
+        return 1;
+    }
+
+    int ret = cfg_read(&wb->cfg, &conf);
+
+    config_destroy(&conf);
+    return ret;
+}
+
+static int
+init_render(struct wayboard *wb) {
+    size_t shm_stride = wb->cfg.width * 4;
+    wb->state.pixman_image = pixman_image_create_bits(PIXMAN_a8r8g8b8, wb->cfg.width, wb->cfg.width,
+                                                      wb->state.shm_data, shm_stride);
+    if (!wb->state.pixman_image) {
+        fprintf(stderr, "failed to create pixman image\n");
+        return 1;
+    }
+
+    pixman_image_fill_rectangles(PIXMAN_OP_SRC, wb->state.pixman_image, &wb->cfg.background, 1,
                                  &(pixman_rectangle16_t){
                                      0,
                                      0,
-                                     config.width,
-                                     config.height,
+                                     wb->cfg.width,
+                                     wb->cfg.height,
                                  });
+
+    wl_surface_damage_buffer(wb->wl.surface, 0, 0, INT32_MAX, INT32_MAX);
+    wayboard_commit_frame(wb, 0);
+
+    return 0;
+}
+
+static int
+init_wayland(struct wayboard *wb) {
+    wb->wl.display = wl_display_connect(NULL);
+    if (!wb->wl.display) {
+        perror("failed to connect to a wayland display");
+        return 1;
+    }
+
+    wb->wl.registry = wl_display_get_registry(wb->wl.display);
+    assert(wb->wl.registry);
+    wl_registry_add_listener(wb->wl.registry, &registry_listener, wb);
+    if (wl_display_roundtrip(wb->wl.display) == -1) {
+        perror("failed to roundtrip wayland display during init");
+        goto fail_roundtrip_globals;
+    }
+
+    if (!wb->wl.compositor || !wb->wl.shm || !wb->wl.xdg_wm_base) {
+        fprintf(stderr, "missing wayland globals\n");
+        goto fail_globals;
+    }
+
+    size_t shm_stride = wb->cfg.width * 4;
+    size_t shm_size = wb->cfg.height * shm_stride;
+    wb->state.shm_fd = memfd_create("wayboard-shm", MFD_CLOEXEC);
+    if (wb->state.shm_fd < 0) {
+        perror("failed to create memfd");
+        goto fail_memfd;
+    }
+    if (ftruncate(wb->state.shm_fd, shm_size) != 0) {
+        perror("failed to expand memfd");
+        goto fail_memfd_truncate;
+    }
+    wb->state.shm_data =
+        mmap(NULL, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, wb->state.shm_fd, 0);
+    if (wb->state.shm_data == MAP_FAILED) {
+        perror("failed to mmap memfd");
+        goto fail_memfd_mmap;
+    }
+
+    struct wl_shm_pool *shm_pool = wl_shm_create_pool(wb->wl.shm, wb->state.shm_fd, shm_size);
+    assert(shm_pool);
+    wb->wl.buffer = wl_shm_pool_create_buffer(shm_pool, 0, wb->cfg.width, wb->cfg.height,
+                                              shm_stride, WL_SHM_FORMAT_ARGB8888);
+    assert(wb->wl.buffer);
+    wl_buffer_add_listener(wb->wl.buffer, &buffer_listener, wb);
+    wl_shm_pool_destroy(shm_pool);
+
+    wb->wl.surface = wl_compositor_create_surface(wb->wl.compositor);
+    assert(wb->wl.surface);
+    wb->wl.xdg_surface = xdg_wm_base_get_xdg_surface(wb->wl.xdg_wm_base, wb->wl.surface);
+    assert(wb->wl.xdg_surface);
+    wb->wl.xdg_toplevel = xdg_surface_get_toplevel(wb->wl.xdg_surface);
+    assert(wb->wl.xdg_toplevel);
+
+    xdg_surface_add_listener(wb->wl.xdg_surface, &xdg_surface_listener, wb);
+    xdg_toplevel_add_listener(wb->wl.xdg_toplevel, &xdg_toplevel_listener, wb);
+
+    xdg_toplevel_set_app_id(wb->wl.xdg_toplevel, "wayboard");
+    xdg_toplevel_set_title(wb->wl.xdg_toplevel, "wayboard");
+    xdg_toplevel_set_min_size(wb->wl.xdg_toplevel, wb->cfg.width, wb->cfg.height);
+    xdg_toplevel_set_max_size(wb->wl.xdg_toplevel, wb->cfg.width, wb->cfg.height);
+    wl_surface_commit(wb->wl.surface);
+    if (wl_display_roundtrip(wb->wl.display) == -1) {
+        perror("failed to roundtrip wayland display during xdg_toplevel init");
+        goto fail_roundtrip_globals;
+    }
+
+    return 0;
+
+fail_memfd_mmap:
+fail_memfd_truncate:
+    close(wb->state.shm_fd);
+
+fail_memfd:
+fail_globals:
+    if (wb->wl.compositor) {
+        wl_compositor_destroy(wb->wl.compositor);
+    }
+    if (wb->wl.shm) {
+        wl_shm_destroy(wb->wl.shm);
+    }
+    if (wb->wl.xdg_wm_base) {
+        xdg_wm_base_destroy(wb->wl.xdg_wm_base);
+    }
+
+fail_roundtrip_globals:
+    wl_registry_destroy(wb->wl.registry);
+    wl_display_disconnect(wb->wl.display);
+    return 1;
 }
 
 static void
-render_frame(uint32_t time) {
-    wl_surface_attach(wl_surface, wl_buffer, 0, 0);
-    for (size_t i = 0; i < config.count; i++) {
-        if (updated[i]) {
-            render_key(&config.keys[i], &states[i]);
-            updated[i] = false;
-        } else if (states[i].unrender_at == frame_count) {
-            render_key(&config.keys[i], &states[i]);
+render_frame(struct wayboard *wb) {
+    // Wait until the SHM buffer is available for new content.
+    wayboard_spin_buffer_release(wb);
+
+    // Unrender any keys which were previously in threshold.
+    for (size_t i = 0; i < MAX_KEYS; i++) {
+        if (!KEY_DEFINED(wb, i)) {
+            continue;
+        }
+
+        struct wb_key_state *ks = &wb->state.keys[i];
+        struct cfg_key *key = &wb->cfg.keys[i];
+
+        bool pressed = ks->last_press_usec > ks->last_release_usec;
+        uint64_t time_active_usec = ks->last_release_usec - ks->last_press_usec;
+        bool in_threshold = (wb->cfg.time_threshold > 0) && (ks->last_press_usec != 0) &&
+                            (time_active_usec < (uint64_t)wb->cfg.time_threshold * 1000) &&
+                            !pressed;
+
+        if (in_threshold && usec_now() > ks->unrender_at_usec) {
+            pixman_image_fill_rectangles(PIXMAN_OP_SRC, wb->state.pixman_image, &wb->cfg.background,
+                                         1,
+                                         &(pixman_rectangle16_t){
+                                             key->x,
+                                             key->y,
+                                             key->w,
+                                             key->h,
+                                         });
+            wl_surface_damage_buffer(wb->wl.surface, key->x, key->y, key->w, key->h);
+
+            ks->unrender_at_usec = UINT64_MAX;
         }
     }
-    wl_surface_commit(wl_surface);
-    frame_count++;
 }
 
 static void
-render_key(struct config_key *key, struct key_state *state) {
-    bool active = state->last_release < state->last_press;
-    uint64_t time_active = (state->last_release - state->last_press) / 1000000;
-    bool in_threshold = config.time_threshold > 0 && state->last_press != 0 &&
-                        time_active < (uint64_t)config.time_threshold && !active;
+render_key(struct wayboard *wb, uint32_t keycode) {
+    assert(keycode < MAX_KEYS);
 
-    pixman_color_t foreground, text;
-    if (active || (in_threshold && state->unrender_at != frame_count)) {
-        foreground = config.foreground_active;
-        text = config.text_active;
-        state->unrender_at = frame_count + config.threshold_life;
-    } else {
-        foreground = config.foreground_inactive;
-        text = config.text_inactive;
+    if (!KEY_DEFINED(wb, keycode)) {
+        return;
     }
-    pixman_image_fill_rectangles(PIXMAN_OP_SRC, pix, &foreground, 1,
+
+    struct wb_key_state *ks = &wb->state.keys[keycode];
+    struct cfg_key *key = &wb->cfg.keys[keycode];
+
+    // Determine the current state of the key.
+    //
+    //   - `time_active_usec` will underflow to a large value if the key is currently held. If the
+    //     key is not currently held, it will contain the last press duration.
+    //   - `in_threshold` is true if all of the following are true:
+    //     - the user has set `time_threshold` in their config
+    //     - the last press duration was lower than `time_threshold`
+    //     - the key has been pressed at least once
+    //     - the key is currently not pressed
+    bool pressed = ks->last_press_usec > ks->last_release_usec;
+
+    uint64_t time_active_usec = ks->last_release_usec - ks->last_press_usec;
+    bool in_threshold = (wb->cfg.time_threshold > 0) && (ks->last_press_usec != 0) &&
+                        (time_active_usec < (uint64_t)wb->cfg.time_threshold * 1000) && !pressed;
+
+    // If this is the first frame where the key is within the threshold, then the `unrender_at_usec`
+    // value should be updated.
+    uint64_t expected_unrender_at = ks->last_release_usec + (uint64_t)wb->cfg.threshold_life * 1000;
+    if (in_threshold && ks->unrender_at_usec != expected_unrender_at) {
+        ks->unrender_at_usec = expected_unrender_at;
+    }
+
+    bool render_threshold = in_threshold && usec_now() < ks->unrender_at_usec;
+
+    const pixman_color_t *foreground, *text;
+    if (pressed || render_threshold) {
+        foreground = &wb->cfg.fg_active;
+        text = &wb->cfg.txt_active;
+    } else {
+        foreground = &wb->cfg.fg_inactive;
+        text = &wb->cfg.txt_inactive;
+    }
+
+    // Wait until the SHM buffer is available for new content.
+    wayboard_spin_buffer_release(wb);
+
+    // Fill the key rectangle with the correct foreground color.
+    pixman_image_fill_rectangles(PIXMAN_OP_SRC, wb->state.pixman_image, foreground, 1,
                                  &(pixman_rectangle16_t){
                                      key->x,
                                      key->y,
                                      key->w,
                                      key->h,
                                  });
+
+    // Determine which string of text to render, if any.
     char *text_str = NULL;
-    if (in_threshold && state->unrender_at != frame_count) {
-        text_str = malloc(32);
-        snprintf(text_str, 32, "%" PRIu64 " ms", time_active);
-    } else if (key->text != NULL) {
-        text_str = strdup(key->text);
+    if (render_threshold) {
+        static char threshold_buf[256] = {0};
+        snprintf(threshold_buf, sizeof(threshold_buf), "%" PRIu64 " ms", time_active_usec / 1000);
+
+        text_str = threshold_buf;
+    } else {
+        text_str = pressed ? key->text_active : key->text_inactive;
     }
+
+    // Render text, if any should be shown.
     if (text_str != NULL) {
-        // Convert to UTF-32.
-        char32_t *unicode = calloc(strlen(text_str) + 1, sizeof(char32_t));
-        mbstate_t state = {0};
-        const char *in = text_str;
-        const char *const end = text_str + strlen(text_str) + 1;
-        size_t ret = 0;
-        size_t len = 0;
+        render_key_text(wb, ks, key, text, text_str);
+    }
 
-        while ((ret = mbrtoc32(&unicode[len], in, end - in, &state)) != 0) {
-            if (ret >= (size_t)-3 && ret <= (size_t)-1) {
-                break;
-            }
-            in += ret;
-            len++;
+    // Damage the modified area of the buffer.
+    wl_surface_damage_buffer(wb->wl.surface, key->x, key->y, key->w, key->h);
+}
+
+static void
+render_key_text(struct wayboard *wb, struct wb_key_state *ks, struct cfg_key *key,
+                const pixman_color_t *text, const char *text_str) {
+    // TODO: Cache rasterized text runs from fcft.
+
+    // Convert the given text to UTF32.
+    size_t len = strlen(text_str);
+
+    char32_t *utf32 = calloc(len + 1, sizeof(char32_t));
+    assert(utf32);
+
+    mbstate_t mbstate = {0};
+    const char *in = text_str;
+    const char *const end = text_str + len + 1;
+    size_t pos = 0;
+    for (;;) {
+        size_t n = mbrtoc32(&utf32[pos], in, end - in, &mbstate);
+
+        switch (n) {
+        case 0: // null byte
+            goto done_utf32;
+        case (size_t)(-1): // error cases
+        case (size_t)(-2):
+        case (size_t)(-3):
+            fprintf(stderr, "failed to convert '%s' to UTF-32\n", text_str);
+            goto fail;
+        default: // normal character
+            break;
         }
 
-        // Rasterize.
-        struct fcft_text_run *run =
-            fcft_rasterize_text_run_utf32(font, len, unicode, FCFT_SUBPIXEL_DEFAULT);
-        assert(run != NULL);
-        int width = 0;
-        int height = 0;
-        for (size_t i = 0; i < run->count; i++) {
-            width += run->glyphs[i]->advance.x;
-            if (run->glyphs[i]->height > height) {
-                height = run->glyphs[i]->height;
-            }
-        }
-        int x = key->x + (key->w - width) / 2;
-        int y = key->y + (key->h - height) / 2;
+        pos++;
+        in += n;
+    }
+done_utf32:;
 
-        for (size_t i = 0; i < run->count; i++) {
-            const struct fcft_glyph *g = run->glyphs[i];
-            if (g == NULL) {
-                continue;
-            }
-            pixman_image_t *color = pixman_image_create_solid_fill(&text);
-            if (pixman_image_get_format(g->pix) == PIXMAN_a8r8g8b8) {
-                pixman_image_composite32(PIXMAN_OP_OVER, g->pix, NULL, pix, 0, 0, 0, 0, x + g->x,
-                                         y + font->ascent - g->y, g->width, g->height);
-            } else {
-                pixman_image_composite32(PIXMAN_OP_OVER, color, g->pix, pix, 0, 0, 0, 0, x + g->x,
-                                         y + font->ascent - g->y, g->width, g->height);
-            }
+    // Rasterize the text with fcft and then render it into the shared memory buffer.
+    // It is assumed that the text run will be able to fit within the key rectangle.
+    //
+    // TODO: Use subpixel configuration of output
+    struct fcft_text_run *run =
+        fcft_rasterize_text_run_utf32(wb->font, pos, utf32, FCFT_SUBPIXEL_DEFAULT);
+    if (!run) {
+        fprintf(stderr, "failed to rasterize text run for '%s'\n", text_str);
+        goto fail;
+    }
+
+    int text_width = 0;
+    int text_height = 0;
+    for (size_t i = 0; i < run->count; i++) {
+        if (!run->glyphs[i]) {
+            continue;
+        }
+
+        text_width += run->glyphs[i]->advance.x;
+        text_height = MAX(text_height, run->glyphs[i]->height);
+    }
+    int x = key->x + (key->w - text_width) / 2;
+    int y = key->y + (key->h - text_height) / 2;
+
+    for (size_t i = 0; i < run->count; i++) {
+        const struct fcft_glyph *glyph = run->glyphs[i];
+        if (!glyph) {
+            continue;
+        }
+
+        if (pixman_image_get_format(glyph->pix) == PIXMAN_a8r8g8b8) {
+            pixman_image_composite32(PIXMAN_OP_OVER, glyph->pix, NULL, wb->state.pixman_image, 0, 0,
+                                     0, 0, x + glyph->x, y + wb->font->ascent - glyph->y,
+                                     glyph->width, glyph->height);
+        } else {
+            pixman_image_t *color = pixman_image_create_solid_fill(text);
+            pixman_image_composite32(PIXMAN_OP_OVER, color, glyph->pix, wb->state.pixman_image, 0,
+                                     0, 0, 0, x + glyph->x, y + wb->font->ascent - glyph->y,
+                                     glyph->width, glyph->height);
             pixman_image_unref(color);
-            x += g->advance.x;
         }
-        free(unicode);
-        free(text_str);
-        fcft_text_run_destroy(run);
+        x += glyph->advance.x;
     }
-    wl_surface_damage_buffer(wl_surface, key->x, key->y, key->w, key->h);
+
+    fcft_text_run_destroy(run);
+    free(utf32);
+    return;
+
+fail:
+    free(utf32);
+    return;
+}
+
+static inline uint64_t
+usec_now() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+
+    return (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000;
 }
 
 static void
-create_window() {
-    char name[32];
-    snprintf(name, 32, "/wayboard-%d", getpid());
-    shm_fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
-    assert(shm_fd >= 0);
-    shm_unlink(name);
-    size_t size = config.width * config.height * 4;
-    size_t stride = config.width * 4;
-    assert(ftruncate(shm_fd, size) == 0);
-    shm_data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    assert(shm_data != MAP_FAILED);
-
-    struct wl_shm_pool *pool = wl_shm_create_pool(wl_shm, shm_fd, size);
-    wl_buffer = wl_shm_pool_create_buffer(pool, 0, config.width, config.height, stride,
-                                          WL_SHM_FORMAT_ARGB8888);
-    wl_shm_pool_destroy(pool);
-
-    wl_surface = wl_compositor_create_surface(wl_compositor);
-    xdg_surface = xdg_wm_base_get_xdg_surface(xdg_wm_base, wl_surface);
-    xdg_toplevel = xdg_surface_get_toplevel(xdg_surface);
-    xdg_surface_add_listener(xdg_surface, &xdg_surface_listener, NULL);
-    xdg_toplevel_add_listener(xdg_toplevel, &xdg_toplevel_listener, NULL);
-
-    xdg_surface_set_window_geometry(xdg_surface, 0, 0, config.width, config.height);
-    xdg_toplevel_set_app_id(xdg_toplevel, "wayboard");
-    xdg_toplevel_set_title(xdg_toplevel, "Wayboard");
-    xdg_toplevel_set_min_size(xdg_toplevel, config.width, config.height);
-    xdg_toplevel_set_max_size(xdg_toplevel, config.width, config.height);
-    wl_surface_commit(wl_surface);
-    wl_display_roundtrip(wl_display);
-
-    pix = pixman_image_create_bits(PIXMAN_a8r8g8b8, config.width, config.height, shm_data, stride);
-    pixman_region32_t clip;
-    pixman_region32_init_rect(&clip, 0, 0, config.width, config.height);
-    pixman_image_set_clip_region32(pix, &clip);
-    pixman_region32_fini(&clip);
-    render_clear_buffer();
-    for (size_t i = 0; i < config.count; i++) {
-        render_key(&config.keys[i], &states[i]);
+wayboard_fini_wl(struct wayboard *wb) {
+    if (wb->wl.frame_cb) {
+        wl_callback_destroy(wb->wl.frame_cb);
     }
-    wl_surface_attach(wl_surface, wl_buffer, 0, 0);
-    wl_surface_commit(wl_surface);
 
-    struct wl_callback *cb = wl_surface_frame(wl_surface);
-    wl_callback_add_listener(cb, &wl_surface_frame_listener, NULL);
+    xdg_toplevel_destroy(wb->wl.xdg_toplevel);
+    xdg_surface_destroy(wb->wl.xdg_surface);
+    wl_surface_destroy(wb->wl.surface);
+    wl_buffer_destroy(wb->wl.buffer);
+
+    munmap(wb->state.shm_data, wb->cfg.width * wb->cfg.height * 4);
+    close(wb->state.shm_fd);
+
+    xdg_wm_base_destroy(wb->wl.xdg_wm_base);
+    wl_shm_destroy(wb->wl.shm);
+    wl_compositor_destroy(wb->wl.compositor);
+    wl_registry_destroy(wb->wl.registry);
+    wl_display_disconnect(wb->wl.display);
 }
 
 static void
-read_hex_value(const char *in, pixman_color_t *out) {
-    size_t len = strnlen(in, 10);
-    if (len < 6) {
-        panic("invalid color");
-    }
-    if (in[0] == '#') {
-        in++;
-        len--;
+wayboard_commit_frame(struct wayboard *wb, uint32_t time) {
+    wb->wl.frame_cb = wl_surface_frame(wb->wl.surface);
+    wl_callback_add_listener(wb->wl.frame_cb, &callback_frame_listener, wb);
+
+    wl_surface_attach(wb->wl.surface, wb->wl.buffer, 0, 0);
+    wl_surface_commit(wb->wl.surface);
+
+    wb->state.last_render = time;
+    wb->state.buf_released = false;
+}
+
+static void
+wayboard_process_key(struct wayboard *wb, uint32_t keycode, enum libinput_key_state state,
+                     uint64_t usec) {
+    if (keycode >= MAX_KEYS) {
+        fprintf(stderr, "warn: keycode %d over max processed (%d)\n", keycode, MAX_KEYS);
+        return;
     }
 
-    unsigned int r, g, b, a;
-    switch (len) {
-    case 6:
-        sscanf(in, "%2x%2x%2x", &r, &g, &b);
-        a = 255;
+    struct wb_key_state *ks = &wb->state.keys[keycode];
+    switch (state) {
+    case LIBINPUT_KEY_STATE_PRESSED:
+        ks->last_press_usec = usec;
         break;
-    case 8:
-        sscanf(in, "%2x%2x%2x%2x", &r, &g, &b, &a);
+    case LIBINPUT_KEY_STATE_RELEASED:
+        ks->last_release_usec = usec;
         break;
-    default:
-        panic("invalid color");
     }
-    out->red = r * 256;
-    out->green = g * 256;
-    out->blue = b * 256;
-    out->alpha = a * 256;
+
+    render_key(wb, keycode);
 }
 
-static void
-read_config(const char *path) {
-    const char *str;
-    config_t raw_config;
-    config_init(&raw_config);
-    assert(config_read_file(&raw_config, path) == CONFIG_TRUE);
+static int
+wayboard_process_libinput(struct wayboard *wb) {
+    int err = libinput_dispatch(wb->libinput);
+    if (err != 0) {
+        fprintf(stderr, "failed to dispatch libinput: %s\n", strerror(-err));
+        return 1;
+    }
 
-    struct color {
-        const char *name;
-        pixman_color_t *data;
-        bool optional;
+    for (;;) {
+        struct libinput_event *event = libinput_get_event(wb->libinput);
+        if (!event) {
+            return 0;
+        }
+
+        // Only process keyboard key events.
+        if (libinput_event_get_type(event) != LIBINPUT_EVENT_KEYBOARD_KEY) {
+            libinput_event_destroy(event);
+            continue;
+        }
+
+        struct libinput_event_keyboard *kbd_event = libinput_event_get_keyboard_event(event);
+        uint32_t keycode = libinput_event_keyboard_get_key(kbd_event);
+        enum libinput_key_state state = libinput_event_keyboard_get_key_state(kbd_event);
+        uint64_t usec = libinput_event_keyboard_get_time_usec(kbd_event);
+
+        // Utilities such as `wev` show XKB keycodes, which are 8 greater than libinput keycodes.
+        wayboard_process_key(wb, keycode + 8, state, usec);
+        libinput_event_destroy(event);
+    }
+}
+
+static int
+wayboard_run(struct wayboard *wb) {
+    struct pollfd pollfds[] = {
+        {.fd = libinput_get_fd(wb->libinput), .events = POLLIN},
+        {.fd = wl_display_get_fd(wb->wl.display), .events = POLLIN},
     };
-    struct color base_colors[] = {
-        {"background", &config.background, false},
-        {"foreground_active", &config.foreground_active, false},
-        {"foreground_inactive", &config.foreground_inactive, false},
-        {"text_active", &config.text_active, true},
-        {"text_inactive", &config.text_inactive, true},
-    };
-    for (size_t i = 0; i < sizeof(base_colors) / sizeof(struct color); i++) {
-        struct color color = base_colors[i];
-        if (config_lookup_string(&raw_config, color.name, &str)) {
-            read_hex_value(str, color.data);
-        } else if (!color.optional) {
-            panic("missing color: %s", color.name);
-        }
-    }
 
-    if (config_lookup_string(&raw_config, "font", &str)) {
-        config.font = strdup(str);
-    }
-
-    if (!config_lookup_int(&raw_config, "width", &config.width) ||
-        !config_lookup_int(&raw_config, "height", &config.height)) {
-        if (config.width < 0 || config.height < 0 || config.width > 4096 || config.height > 4096) {
-            panic("invalid window size");
+    while (!wb->state.should_close) {
+        if (wl_display_flush(wb->wl.display) == -1) {
+            perror("failed to flush wayland display");
+            return 1;
         }
-        panic("missing size information for window");
-    }
-
-    config_setting_t *keys = config_lookup(&raw_config, "keys");
-    size_t count = config_setting_length(keys);
-    if (count > 256) {
-        panic("more than 256 keys");
-    }
-
-    bool font_warning = false;
-    if (config_lookup_int(&raw_config, "time_threshold", &config.time_threshold)) {
-        if (config.font == NULL && !font_warning) {
-            font_warning = true;
-            config.font = "";
-            fprintf(stderr, "WARNING: No font specified.\n");
+        if (poll(pollfds, ARRAY_LEN(pollfds), -1) < 0) {
+            perror("failed to poll fds");
+            return 1;
         }
-        if (!config_lookup_int(&raw_config, "threshold_life", &config.threshold_life)) {
-            panic("no threshold_life value with a set time_threshold");
-        }
-    }
-    config.count = count;
-    for (size_t i = 0; i < count; i++) {
-        int scancode;
-        config_setting_t *key = config_setting_get_elem(keys, i);
-        if (config_setting_lookup_int(key, "x", &config.keys[i].x) &&
-            config_setting_lookup_int(key, "y", &config.keys[i].y) &&
-            config_setting_lookup_int(key, "w", &config.keys[i].w) &&
-            config_setting_lookup_int(key, "h", &config.keys[i].h) &&
-            config_setting_lookup_int(key, "scancode", &scancode)) {
-            config.keys[i].scancode = scancode;
-            if (config_setting_lookup_string(key, "text", &str)) {
-                if (config.font == NULL && !font_warning) {
-                    font_warning = true;
-                    config.font = "";
-                    fprintf(stderr, "WARNING: No font specified.\n");
-                }
-                config.keys[i].text = strdup(str);
+
+        if (pollfds[0].revents & POLLIN) {
+            if (wayboard_process_libinput(wb) != 0) {
+                return 1;
             }
-        } else {
-            panic("key %d missing required information", i);
+        }
+        if (pollfds[1].revents & POLLIN) {
+            if (wl_display_dispatch(wb->wl.display) == -1) {
+                perror("failed to dispatch wayland display");
+                return 1;
+            }
         }
     }
-    config_destroy(&raw_config);
+
+    return 0;
 }
 
 static void
-setup_libinput() {
-    assert((udev = udev_new()));
-    assert((libinput = libinput_udev_create_context(&libinput_interface, NULL, udev)));
-    const char *seat = getenv("XDG_SEAT");
-    if (seat == NULL) {
-        seat = "seat0";
+wayboard_spin_buffer_release(struct wayboard *wb) {
+    if (wb->state.buf_released) {
+        return;
     }
-    libinput_udev_assign_seat(libinput, seat);
-    libinput_dispatch(libinput);
 
-    if (geteuid() == 0) {
-        printf("INFO: dropping root privileges (geteuid() == 0)\n");
-        if (setgid(getgid()) != 0) {
-            panic("drop root (setgid): %s", strerror(errno));
+    struct timespec start;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    uint64_t start_usec = (uint64_t)start.tv_sec * 1000000 + (uint64_t)start.tv_nsec / 1000;
+
+    while (!wb->state.buf_released) {
+        uint64_t now_usec = usec_now();
+        if (now_usec - start_usec > 10 * 1000000) {
+            fprintf(stderr, "no wl_buffer.release sent after 10 seconds\n");
+            goto fail;
         }
-        if (setuid(getuid()) != 0) {
-            panic("drop root (setuid): %s", strerror(errno));
+
+        if (wl_display_flush(wb->wl.display) == -1) {
+            fprintf(stderr, "failed to flush wayland display while awaiting buffer release\n");
+            goto fail;
         }
-        if (setuid(0) == 0) {
-            panic("root privileges not dropped (use the setuid bit)");
-        } else {
-            printf("INFO: dropped root privileges\n");
+        if (wl_display_dispatch(wb->wl.display) == -1) {
+            fprintf(stderr, "failed to dispatch wayland display while awaiting buffer release\n");
+            goto fail;
         }
     }
+
+    return;
+
+fail:
+    wb->state.should_close = true;
+    return;
 }
 
 int
 main(int argc, char **argv) {
-    fcft_init(FCFT_LOG_COLORIZE_AUTO, false, FCFT_LOG_CLASS_WARNING);
-    setup_libinput();
-
     if (argc != 2) {
-        fprintf(stderr, "USAGE: %s CONFIG_FILE\n", argv[0]);
+        fprintf(stderr, "USAGE: %s CONFIG_FILE\n", argv[0] ? argv[0] : "wayboard");
         return 1;
     }
-    read_config(argv[1]);
-    if (config.font != NULL) {
-        tll(const char *) font_names = tll_init();
-        tll_push_back(font_names, config.font);
-        size_t i = 0;
-        const char *names[tll_length(font_names)];
-        tll_foreach(font_names, iter) names[i++] = iter->item;
-        font = fcft_from_name(1, names, NULL);
-        if (font == NULL) {
-            panic("no font loaded");
-        }
-        tll_free(font_names);
+
+    struct wayboard wb = {0};
+
+    if (init_libinput(&wb) != 0) {
+        return 1;
+    }
+    if (init_read_config(&wb, argv[1]) != 0) {
+        goto fail_config;
+    }
+    if (init_wayland(&wb) != 0) {
+        goto fail_wayland;
+    }
+    if (init_fcft(&wb) != 0) {
+        goto fail_fcft;
+    }
+    if (init_render(&wb) != 0) {
+        goto fail_render;
     }
 
-    assert((wl_display = wl_display_connect(NULL)));
-    assert((wl_registry = wl_display_get_registry(wl_display)));
-    wl_registry_add_listener(wl_registry, &wl_registry_listener, NULL);
-    wl_display_roundtrip(wl_display);
-    assert(wl_compositor != NULL && wl_shm != NULL && xdg_wm_base != NULL);
-    xdg_wm_base_add_listener(xdg_wm_base, &xdg_wm_base_listener, NULL);
-    create_window();
+    int ret = wayboard_run(&wb);
 
-    struct pollfd fds[] = {
-        {.fd = libinput_get_fd(libinput), .events = POLLIN},
-        {.fd = wl_display_get_fd(wl_display), .events = POLLIN},
-    };
-    while (!stop) {
-        wl_display_flush(wl_display);
-        if (poll(fds, sizeof(fds) / sizeof(struct pollfd), -1) < 0) {
-            panic("poll: %s\n", strerror(errno));
-        }
+    pixman_image_unref(wb.state.pixman_image);
+    fcft_fini();
+    wayboard_fini_wl(&wb);
+    cfg_destroy(&wb.cfg);
+    libinput_unref(wb.libinput);
+    udev_unref(wb.udev);
+    return ret;
 
-        // Check libinput.
-        if ((fds[0].revents & POLLIN) != 0) {
-            libinput_dispatch(libinput);
-            struct libinput_event *event;
-            while ((event = libinput_get_event(libinput)) != NULL) {
-                if (libinput_event_get_type(event) != LIBINPUT_EVENT_KEYBOARD_KEY) {
-                    goto next;
-                }
-                struct libinput_event_keyboard *kevt = libinput_event_get_keyboard_event(event);
-                uint32_t key = libinput_event_keyboard_get_key(kevt);
-                enum libinput_key_state state = libinput_event_keyboard_get_key_state(kevt);
-                struct timespec ts_now;
-                clock_gettime(CLOCK_MONOTONIC, &ts_now);
-                uint64_t time = ts_now.tv_sec * 1000000000 + ts_now.tv_nsec;
+fail_render:
+    fcft_fini();
 
-                struct key_state *key_state = NULL;
-                for (size_t i = 0; i < config.count; i++) {
-                    if (config.keys[i].scancode == key + 8) {
-                        key_state = &states[i];
-                        updated[i] = true;
-                        break;
-                    }
-                }
-                if (key_state == NULL) {
-                    goto next;
-                }
+fail_fcft:
+    wayboard_fini_wl(&wb);
 
-                switch (state) {
-                case LIBINPUT_KEY_STATE_PRESSED:
-                    key_state->last_press = time;
-                    break;
-                case LIBINPUT_KEY_STATE_RELEASED:
-                    key_state->last_release = time;
-                    break;
-                }
-            next:
-                libinput_event_destroy(event);
-            }
-        }
+fail_wayland:
+    cfg_destroy(&wb.cfg);
 
-        // Check wayland.
-        if ((fds[1].revents & POLLIN) != 0) {
-            assert(wl_display_dispatch(wl_display) != -1);
-        }
-    }
-
-    cleanup();
-    return 0;
+fail_config:
+    libinput_unref(wb.libinput);
+    udev_unref(wb.udev);
+    return 1;
 }

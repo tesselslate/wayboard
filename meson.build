@@ -42,7 +42,6 @@ executable('wayboard',
   'wayboard.c',
   dependencies: [
     dependency('fcft'),
-    dependency('tllist'),
 
     dependency('libinput'),
     dependency('libudev'),
