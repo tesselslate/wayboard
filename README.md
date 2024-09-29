@@ -21,7 +21,8 @@ The following dependencies are required for both building and running:
 - `pixman`
 - `wayland-client`
 
-To build wayboard, clone the repository and run `make install`.
+To build and install wayboard, clone the repository and run `make
+install`.
 
 > [!IMPORTANT]
 > wayboard requires additional privileges to read keyboard input. If your user
