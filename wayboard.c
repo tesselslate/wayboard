@@ -58,7 +58,10 @@
 #define KEY_DEFINED(wb, code) ((wb)->cfg.keys[(code)].w != 0)
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
-#define MAX_KEYS 256
+// Support both keyboard scancodes (XKB codes up to ~255 + offset) and
+// Linux input button/key codes (e.g., BTN_LEFT=272). KEY_MAX is 0x2ff.
+// Reserve up to 0x300 (768) slots to cover the full range.
+#define MAX_KEYS 768
 
 struct cfg {
     // Appearance
@@ -149,6 +152,8 @@ static void wayboard_commit_frame(struct wayboard *wb, uint32_t time);
 static void wayboard_fini_wl(struct wayboard *wb);
 static void wayboard_process_key(struct wayboard *wb, uint32_t keycode,
                                  enum libinput_key_state state, uint64_t usec);
+static void wayboard_process_code(struct wayboard *wb, uint32_t code, bool pressed,
+                                  uint64_t usec);
 static int wayboard_process_libinput(struct wayboard *wb);
 static int wayboard_run(struct wayboard *wb);
 static void wayboard_spin_buffer_release(struct wayboard *wb);
@@ -947,22 +952,24 @@ wayboard_fini_wl(struct wayboard *wb) {
 static void
 wayboard_process_key(struct wayboard *wb, uint32_t keycode, enum libinput_key_state state,
                      uint64_t usec) {
-    if (keycode >= MAX_KEYS) {
-        fprintf(stderr, "warn: keycode %d over max processed (%d)\n", keycode, MAX_KEYS);
+    wayboard_process_code(wb, keycode, state == LIBINPUT_KEY_STATE_PRESSED, usec);
+}
+
+static void
+wayboard_process_code(struct wayboard *wb, uint32_t code, bool pressed, uint64_t usec) {
+    if (code >= MAX_KEYS) {
+        fprintf(stderr, "warn: code %u over max processed (%d)\n", code, MAX_KEYS);
         return;
     }
 
-    struct wb_key_state *ks = &wb->state.keys[keycode];
-    switch (state) {
-    case LIBINPUT_KEY_STATE_PRESSED:
+    struct wb_key_state *ks = &wb->state.keys[code];
+    if (pressed) {
         ks->last_press_usec = usec;
-        break;
-    case LIBINPUT_KEY_STATE_RELEASED:
+    } else {
         ks->last_release_usec = usec;
-        break;
     }
 
-    render_key(wb, keycode);
+    render_key(wb, code);
 }
 
 static int
@@ -979,19 +986,33 @@ wayboard_process_libinput(struct wayboard *wb) {
             return 0;
         }
 
-        // Only process keyboard key events.
-        if (libinput_event_get_type(event) != LIBINPUT_EVENT_KEYBOARD_KEY) {
+        enum libinput_event_type type = libinput_event_get_type(event);
+
+        if (type == LIBINPUT_EVENT_KEYBOARD_KEY) {
+            struct libinput_event_keyboard *kbd_event = libinput_event_get_keyboard_event(event);
+            uint32_t keycode = libinput_event_keyboard_get_key(kbd_event);
+            enum libinput_key_state state = libinput_event_keyboard_get_key_state(kbd_event);
+            uint64_t usec = libinput_event_keyboard_get_time_usec(kbd_event);
+
+            // Utilities such as `wev` show XKB keycodes, which are 8 greater than libinput keycodes.
+            wayboard_process_key(wb, keycode + 8, state, usec);
             libinput_event_destroy(event);
             continue;
         }
 
-        struct libinput_event_keyboard *kbd_event = libinput_event_get_keyboard_event(event);
-        uint32_t keycode = libinput_event_keyboard_get_key(kbd_event);
-        enum libinput_key_state state = libinput_event_keyboard_get_key_state(kbd_event);
-        uint64_t usec = libinput_event_keyboard_get_time_usec(kbd_event);
+        if (type == LIBINPUT_EVENT_POINTER_BUTTON) {
+            struct libinput_event_pointer *ptr_event = libinput_event_get_pointer_event(event);
+            uint32_t button = libinput_event_pointer_get_button(ptr_event); // e.g., BTN_LEFT=272
+            enum libinput_button_state bstate =
+                libinput_event_pointer_get_button_state(ptr_event);
+            uint64_t usec = libinput_event_pointer_get_time_usec(ptr_event);
 
-        // Utilities such as `wev` show XKB keycodes, which are 8 greater than libinput keycodes.
-        wayboard_process_key(wb, keycode + 8, state, usec);
+            wayboard_process_code(wb, button, bstate == LIBINPUT_BUTTON_STATE_PRESSED, usec);
+            libinput_event_destroy(event);
+            continue;
+        }
+
+        // Ignore all other events
         libinput_event_destroy(event);
     }
 }
