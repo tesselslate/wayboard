@@ -41,5 +41,5 @@ projects; see the source code for more information.
 
 # Configuration
 
-See the [example](https://github.com/tesselslate/input-display/blob/main/example.cfg)
+See the [example](https://github.com/tesselslate/wayboard/blob/main/example.cfg)
 configuration file.
